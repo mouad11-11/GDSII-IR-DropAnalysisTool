@@ -1,6 +1,4 @@
-"""
-FastAPI Backend Server for GDSII IR-Drop Analysis and Precise Value Margin Verification.
-"""
+"""FastAPI backend for GDSII IR-drop analysis."""
 
 from dataclasses import asdict
 import json
@@ -519,14 +517,14 @@ def export_html_report(file_id: str):
 </head>
 <body>
     <div class="no-print-bar">
-        <button class="btn-print" onclick="window.print()">🖨️ PRINT / SAVE AS PDF</button>
+        <button class="btn-print" onclick="window.print()">PRINT / SAVE AS PDF</button>
     </div>
 
     <div class="header">
         <div>
-            <div class="title">&gt; VOLTDROP_GDSII :: SILICON SIGNOFF CERTIFICATE</div>
-            <div class="meta">PHYSICAL PDN EXTRACTION • FINITE-DIFFERENCE MESH SOLVER • PRECISE VALUE MARGIN</div>
-            <div class="meta" style="margin-top:6px;">Target Layout: <b>{filename}</b> | Verified At: {timestamp}</div>
+            <div class="title">&gt; VOLTDROP_GDSII :: SIGNOFF REPORT</div>
+            <div class="meta">PHYSICAL PDN EXTRACTION • PRECISE VALUE MARGIN VERIFICATION</div>
+            <div class="meta" style="margin-top:6px;">Layout: <b>{filename}</b> | Verified: {timestamp}</div>
         </div>
         <div class="stamp {status_class}">
             {status_label}
@@ -601,7 +599,7 @@ def export_html_report(file_id: str):
     </table>
 
     <div style="text-align:center; font-size:10px; color:#64748b; margin-top:20px; border-top:1px solid #172233; padding-top:15px;">
-        CONFIDENTIAL SILICON VERIFICATION REPORT • VOLTDROP GDSII AUTOMATED EDA ENGINE
+        VoltDrop GDSII Verification Report
     </div>
 </body>
 </html>"""

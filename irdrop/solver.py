@@ -1,7 +1,4 @@
-"""
-Sparse Linear Circuit Solver for Integrated Circuit Power Delivery Networks.
-Calculates node voltages, static IR drops, and spatial power dissipation.
-"""
+"""Sparse linear solver for PDN node potentials and static IR-drop."""
 
 from dataclasses import dataclass
 import time
@@ -16,7 +13,6 @@ from irdrop.pdn_model import PDNNetwork
 
 @dataclass
 class SolverResult:
-    """Contains raw and shaped IR drop simulation results."""
     v_nom: float
     total_current: float
     solve_time_seconds: float
@@ -45,21 +41,17 @@ class IRDropSolver:
         v_nom: float = 1.0,
         total_current: float = 0.5,  # Amperes
         distribution: str = "uniform",  # 'uniform', 'center_hotspot', 'dual_hotspot', 'quad_hotspot'
-        hotspot_boxes: Optional[List[Dict[str, float]]] = None,  # [{'x_min', 'y_min', 'x_max', 'y_max', 'multiplier'}]
+        hotspot_boxes: Optional[List[Dict[str, float]]] = None,
     ) -> SolverResult:
-        """
-        Solves G * V = I for node voltages across all metal layers.
-        """
         t0 = time.time()
         net = self.network
         ny, nx = net.grid_shape
         min_x, min_y, max_x, max_y = net.bbox
 
-        # Build coordinate arrays
         x_coords = np.linspace(min_x, max_x, nx)
         y_coords = np.linspace(min_y, max_y, ny)
 
-        # 1. Identify nodes connected to power pad network
+        # Connected components to isolate floating metal
         n_components, comp_labels = sp.csgraph.connected_components(net.G, directed=False)
         pad_components = set(comp_labels[p] for p in net.pad_node_indices)
         connected_to_pads = np.isin(comp_labels, list(pad_components))
@@ -68,7 +60,6 @@ class IRDropSolver:
         if not valid_sink_indices:
             valid_sink_indices = list(net.pad_node_indices)
 
-        # Compute current distribution weights for valid sink nodes on M1
         sink_weights = np.zeros(len(valid_sink_indices), dtype=np.float64)
         nodes_per_layer = ny * nx
 
@@ -110,12 +101,12 @@ class IRDropSolver:
         else:
             current_per_sink = np.full(len(valid_sink_indices), total_current / max(len(valid_sink_indices), 1))
 
-        # 2. Setup RHS vector
+        # Setup RHS vector
         rhs = np.zeros(net.total_nodes, dtype=np.float64)
         for i, s_idx in enumerate(valid_sink_indices):
             rhs[s_idx] = -current_per_sink[i]
 
-        # 3. Impose Dirichlet Boundary Conditions on Pad Nodes
+        # Dirichlet boundary conditions on pad nodes
         A = net.G.tolil()
         pad_set = set(net.pad_node_indices)
 
@@ -132,7 +123,7 @@ class IRDropSolver:
 
         A_csr = A.tocsr()
 
-        # 4. Solve sparse linear system
+        # Solve sparse linear system
         V = spla.spsolve(A_csr, rhs)
         solve_time = time.time() - t0
 

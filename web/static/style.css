@@ -1,9 +1,4 @@
-/* ==========================================================================
-   VoltDrop GDSII - Ultra-Dark Terminal Theme (JetBrains Mono Typography)
-   Everything is stealth dark except for the vivid IC Heatmap.
-   ========================================================================== */
-
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Fira+Code:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 :root {
   /* Terminal Font Family */
@@ -71,9 +66,7 @@ body {
   background: var(--accent-cyan);
 }
 
-/* ==========================================================================
-   App Header (Terminal Prompt Style)
-   ========================================================================== */
+/* Header */
 .app-header {
   background: #02040a;
   border-bottom: 1px solid var(--border-color);
@@ -165,9 +158,7 @@ body {
   box-shadow: 0 0 10px rgba(0, 242, 254, 0.2);
 }
 
-/* ==========================================================================
-   Main Grid Layout
-   ========================================================================== */
+/* Layout */
 .main-container {
   display: grid;
   grid-template-columns: 410px 1fr;
@@ -215,9 +206,7 @@ body {
   color: var(--accent-cyan);
 }
 
-/* ==========================================================================
-   Dropzone & File Input
-   ========================================================================== */
+/* Dropzone */
 .dropzone {
   border: 1px dashed var(--border-color);
   border-radius: var(--radius-sm);
@@ -407,9 +396,7 @@ body {
   border-radius: var(--radius-xs);
 }
 
-/* ==========================================================================
-   Signoff Banner & Metrics Strip (Pitch Dark HUD)
-   ========================================================================== */
+/* Signoff banner */
 .signoff-banner {
   background: #03060d;
   border: 1px solid var(--border-color);
@@ -663,9 +650,7 @@ body {
   color: #000000;
 }
 
-/* ==========================================================================
-   Viewer Card & Heatmap Stage (Pure Pitch Black Canvas)
-   ========================================================================== */
+/* Viewer */
 .viewport-area {
   display: flex;
   flex-direction: column;
@@ -936,9 +921,7 @@ body {
   color: var(--accent-cyan);
 }
 
-/* ==========================================================================
-   Detail Tabs & Data Tables
-   ========================================================================== */
+/* Tabs and tables */
 .tabs-header {
   display: flex;
   gap: 6px;

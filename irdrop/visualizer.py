@@ -1,7 +1,4 @@
-"""
-High-Resolution Heatmap Visualizer and Engineering Plot Generator.
-Generates 2D heatmaps with layout wire overlays, isopotential contours, hotspot markers, and 1D cutline profiles.
-"""
+"""Layout IR-drop heatmap and profile visualization."""
 
 import base64
 from io import BytesIO
@@ -12,12 +9,12 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
 
-DARK_BG = "#03060d"       # Pitch dark EDA background
-DARK_CARD = "#080d1a"     # Dark panel accent
-TEXT_COLOR = "#f1f5f9"    # High-contrast light text
-MUTED_TEXT = "#94a3b8"    # Monospace muted text
-GRID_COLOR = "#151e2e"    # Subtle dark grid
-SPINE_COLOR = "#243247"   # Clean dark borders
+DARK_BG = "#03060d"
+DARK_CARD = "#080d1a"
+TEXT_COLOR = "#f1f5f9"
+MUTED_TEXT = "#94a3b8"
+GRID_COLOR = "#151e2e"
+SPINE_COLOR = "#243247"
 
 plt.style.use("dark_background")
 matplotlib.rcParams.update({
@@ -54,7 +51,7 @@ class IRDropVisualizer:
         cmap_name: str = "turbo",
         dpi: int = 150,
     ) -> plt.Figure:
-        """Creates a publication-quality Matplotlib figure with heatmap and annotations."""
+        """Generate 2D potential or voltage drop distribution figure."""
         res = self.result
         analysis = self.analysis
         min_x, min_y, max_x, max_y = self.layout.bbox
@@ -211,7 +208,7 @@ class IRDropVisualizer:
         return fig
 
     def generate_cutline_figure(self, cutline_y_um: Optional[float] = None) -> plt.Figure:
-        """Generates 1D cross-section voltage drop profile across the chip width."""
+        """1D cross-section voltage drop profile."""
         res = self.result
         analysis = self.analysis
         
@@ -254,7 +251,7 @@ class IRDropVisualizer:
         return fig
 
     def generate_3d_surface_figure(self, cmap_name: str = "turbo", dpi: int = 140) -> plt.Figure:
-        """Generates an isometric 3D surface plot of the voltage drop funnel topography."""
+        """3D isometric surface plot of voltage drop."""
         res = self.result
         analysis = self.analysis
 
@@ -306,7 +303,7 @@ class IRDropVisualizer:
         return fig
 
     def generate_histogram_figure(self, dpi: int = 130) -> plt.Figure:
-        """Generates publication-quality histogram of IR-drop distribution with margin line."""
+        """Histogram of node IR-drop distribution."""
         res = self.result
         analysis = self.analysis
 
@@ -339,7 +336,7 @@ class IRDropVisualizer:
         return fig
 
     def generate_current_flow_figure(self, dpi: int = 140) -> plt.Figure:
-        """Generates 2D current flow vector map showing physical current direction from pads to sinks."""
+        """2D current flow vector map."""
         res = self.result
         analysis = self.analysis
         min_x, min_y, max_x, max_y = self.layout.bbox

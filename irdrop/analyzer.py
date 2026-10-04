@@ -1,7 +1,4 @@
-"""
-IR Drop Signoff Analyzer and Precise Value Margin Calculator.
-Performs tolerance verification, hotspot extraction, slack/margin analysis, and statistical reporting.
-"""
+"""IR-drop signoff analyzer and margin calculator."""
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple

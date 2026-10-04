@@ -1,7 +1,4 @@
-"""
-Sample GDSII Generator for Power Delivery Network (PDN) Benchmarks.
-Generates realistic multi-tier IC power grids with metal rails, stripes, vias, and power pads.
-"""
+"""Synthetic GDSII PDN benchmark generator."""
 
 from pathlib import Path
 import numpy as np

@@ -1,8 +1,3 @@
-/**
- * VoltDrop GDSII - Client-side Controller & Interactive Canvas HUD
- * Stealth dark EDA interface with JetBrains Mono terminal typography.
- */
-
 let state = {
   fileId: null,
   filename: null,
@@ -472,9 +467,7 @@ function renderLayerStatsTable(layerMetrics) {
   });
 }
 
-// ==========================================================================
-// Pan & Zoom Engine
-// ==========================================================================
+// Pan and zoom
 function updateTransform() {
   const wrapper = document.getElementById("heatmapCanvasWrapper");
   if (wrapper) {
@@ -541,9 +534,7 @@ function onViewportWheel(e) {
   updateTransform();
 }
 
-// ==========================================================================
-// Hover Cursor Probe HUD
-// ==========================================================================
+// Cursor probe
 function handleProbe(e) {
   const img = document.getElementById("heatmapImage");
   const hud = document.getElementById("probeHud");
@@ -592,9 +583,7 @@ function hideProbe() {
   if (hud) hud.style.display = "none";
 }
 
-// ==========================================================================
-// Interactive Cutline Slider & Laser Line
-// ==========================================================================
+// Cutline slider
 function updateCutlineY(val) {
   const y_um = parseFloat(val);
   document.getElementById("cutlineYVal").innerText = `${y_um.toFixed(1)} µm`;
@@ -618,9 +607,7 @@ function updateCutlineY(val) {
   }, 120);
 }
 
-// ==========================================================================
-// Real-Time What-If Sensitivity Sweeper
-// ==========================================================================
+// Current scaling sensitivity
 function onWhatIfSlide(val) {
   state.whatIfScale = parseInt(val);
   const factor = state.whatIfScale / 100.0;

@@ -1,8 +1,4 @@
-"""
-GDSII Layout Parser and Geometry Extractor using gdstk.
-Extracts cells, hierarchies, polygons, layers, and text labels.
-Provides ultra-fast rasterization of metal layers onto computational grids.
-"""
+"""GDSII layout parser and rasterizer."""
 
 from dataclasses import dataclass, field
 from pathlib import Path
