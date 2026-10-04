@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VoltDrop GDSII - IR-Drop Analysis & Precise Value Margin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Fira+Code:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2300f2fe'><path d='M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5'/></svg>">
+</head>
+<body>
+
+  <!-- Terminal Style Header -->
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-icon">⚡</div>
+      <div>
+        <div style="display:flex; align-items:center;">
+          <span class="brand-prompt">&gt;</span>
+          <span class="brand-title">VOLTDROP_GDSII</span>
+          <span class="brand-tag">v2.1::SIGNOFF</span>
+        </div>
+        <div style="font-size:0.7rem; color:var(--text-muted); margin-top:2px;">PHYSICAL PDN EXTRACTION • FINITE-DIFFERENCE MESH SOLVER • PRECISE VALUE MARGIN</div>
+      </div>
+    </div>
+
+    <!-- Quick Sample Benchmarks -->
+    <div class="sample-bar">
+      <span>BENCHMARKS:</span>
+      <button class="btn-sample" onclick="loadSample('mesh_pdn')">[ $ mesh_pdn ]</button>
+      <button class="btn-sample" onclick="loadSample('hierarchical_pdn')">[ $ soc_4metal ]</button>
+      <button class="btn-sample" onclick="loadSample('bottleneck_pdn')" style="border-color:rgba(255,51,75,0.4); color:var(--fail-red);">[ ! defect_pdn ]</button>
+      <button class="btn-sample" onclick="loadSample('ihp_counter')" style="border-color:rgba(0,255,136,0.4); color:var(--pass-green);">[ $ ihp_counter ]</button>
+      <button class="btn-sample" onclick="loadSample('ihp_inverter')" style="border-color:rgba(56,189,248,0.4); color:var(--accent-blue);">[ $ ihp_inverter ]</button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="main-container">
+    <!-- Left Column: Inputs & Configuration -->
+    <aside class="sidebar">
+      
+      <!-- File Upload Card -->
+      <section class="card">
+        <div class="card-title">
+          <span>&gt; GDSII LAYOUT FILE</span>
+          <span class="icon">⤓</span>
+        </div>
+        <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+          <div class="dropzone-icon">⇪</div>
+          <div class="dropzone-text" id="dropzoneText">DRAG &amp; DROP .gds / .gds2 HERE</div>
+          <div class="dropzone-sub">or click to browse filesystem</div>
+          <input type="file" id="fileInput" accept=".gds,.gds2" style="display:none" onchange="handleFileSelect(event)">
+        </div>
+      </section>
+
+      <!-- Layout Inspection Summary -->
+      <section class="card" id="layoutSummaryCard" style="display:none;">
+        <div class="card-title">
+          <span>&gt; LAYOUT GEOMETRY</span>
+          <span style="font-size:0.75rem; color:var(--accent-cyan);" id="topCellName">TOP_CELL</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Die Dimensions:</span>
+          <span class="info-val" id="dieDimensions">0 × 0 µm</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Bounding Box:</span>
+          <span class="info-val" id="dieBbox">[0, 0] to [0, 0]</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Active Layers:</span>
+          <span class="info-val" id="layerCount">0 detected</span>
+        </div>
+      </section>
+
+      <!-- Layer Stack Manager -->
+      <section class="card" id="layerStackCard" style="display:none;">
+        <div class="card-title">
+          <span>&gt; LAYER STACK &amp; RESISTANCE</span>
+          <span class="icon">⚙</span>
+        </div>
+        <div class="layer-table-wrapper">
+          <table class="layer-table">
+            <thead>
+              <tr>
+                <th>Layer</th>
+                <th>Role</th>
+                <th>Rsq (Ω/□) / Rvia</th>
+              </tr>
+            </thead>
+            <tbody id="layerTableBody">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Electrical & Margin Parameters -->
+      <section class="card">
+        <div class="card-title">
+          <span>&gt; SIMULATION &amp; MARGIN SETTINGS</span>
+          <span class="icon">🎛</span>
+        </div>
+
+        <!-- Nominal Voltage -->
+        <div class="form-group">
+          <div class="form-label">
+            <span>Nominal Supply (V<sub>nom</sub>)</span>
+            <span class="val" id="vnomValDisplay">1.00 V</span>
+          </div>
+          <input type="number" id="vnomInput" class="form-input" value="1.00" step="0.05" min="0.5" max="3.3" oninput="updateVnom(this.value)">
+          <div class="preset-pills">
+            <button class="pill-btn" onclick="setVnom(0.75)">0.75V</button>
+            <button class="pill-btn" onclick="setVnom(0.90)">0.90V</button>
+            <button class="pill-btn" onclick="setVnom(1.00)">1.00V</button>
+            <button class="pill-btn" onclick="setVnom(1.20)">1.20V</button>
+          </div>
+        </div>
+
+        <!-- Margin Limit Threshold -->
+        <div class="form-group">
+          <div class="form-label">
+            <span>Drop Tolerance Limit (ΔV<sub>limit</sub>)</span>
+            <span class="val" id="limitValDisplay">50.0 mV (5.0%)</span>
+          </div>
+          <input type="number" id="limitInput" class="form-input" value="50.0" step="1.0" min="5" max="300" oninput="updateLimit(this.value)">
+          <div class="preset-pills">
+            <button class="pill-btn" onclick="setLimit(30.0)">30 mV (3%)</button>
+            <button class="pill-btn" onclick="setLimit(50.0)">50 mV (5%)</button>
+            <button class="pill-btn" onclick="setLimit(75.0)">75 mV (7.5%)</button>
+            <button class="pill-btn" onclick="setLimit(100.0)">100 mV (10%)</button>
+          </div>
+        </div>
+
+        <!-- Total Current -->
+        <div class="form-group">
+          <div class="form-label">
+            <span>Total Supply Current (I<sub>total</sub>)</span>
+            <span class="val" id="currentValDisplay">400 mA</span>
+          </div>
+          <input type="number" id="currentInput" class="form-input" value="400" step="25" min="10" max="5000" oninput="updateCurrent(this.value)">
+        </div>
+
+        <!-- Current Distribution -->
+        <div class="form-group">
+          <div class="form-label">
+            <span>Current Distribution Profile</span>
+          </div>
+          <select id="distSelect" class="form-select">
+            <option value="uniform">Uniform Active Distribution</option>
+            <option value="center_hotspot" selected>Central Processing Core Hotspot</option>
+            <option value="dual_hotspot">Dual-Core High Activity Clusters</option>
+            <option value="quad_hotspot">Quad-Core SoC Activity Map</option>
+          </select>
+        </div>
+
+        <!-- Grid Resolution -->
+        <div class="form-group">
+          <div class="form-label">
+            <span>Mesh Grid Resolution</span>
+            <span class="val" id="gridResDisplay">100 × 100</span>
+          </div>
+          <input type="range" id="gridResInput" class="range-slider" min="60" max="160" step="20" value="100" oninput="updateGridRes(this.value)">
+          <div style="display:flex; justify-content:space-between; font-size:0.68rem; color:var(--text-muted); margin-top:3px;">
+            <span>FAST (60×60)</span>
+            <span>BALANCED (100×100)</span>
+            <span>ULTRA (160×160)</span>
+          </div>
+        </div>
+
+        <!-- Action Button -->
+        <button id="runBtn" class="btn-primary" onclick="runAnalysis()">
+          <span>⚡ SOLVE IR-DROP NETWORK</span>
+        </button>
+      </section>
+
+    </aside>
+
+    <!-- Right Column: Visualization & Signoff Dashboard -->
+    <section class="viewport-area">
+
+      <!-- Precise Margin Signoff Banner -->
+      <div class="signoff-banner" id="signoffBanner">
+        <div class="banner-top-row">
+          <div class="status-badge">
+            <div class="status-pill pass" id="statusBadge">
+              <span class="pulse-dot"></span>
+              <span id="statusText">READY</span>
+            </div>
+            <div style="font-size:0.8rem; color:var(--text-muted);" id="signoffVerdictText">AWAITING LAYOUT ANALYSIS</div>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button class="btn-sample" onclick="exportCsv()" style="font-size:0.72rem;">📊 CSV</button>
+            <button class="btn-sample" onclick="exportSignoffReport()" style="font-size:0.72rem;">📄 JSON</button>
+            <button class="btn-sample" onclick="exportHtmlReport()" style="font-size:0.72rem; border-color:var(--accent-cyan); color:var(--accent-cyan);">📋 CERTIFICATE</button>
+          </div>
+        </div>
+
+        <div class="metrics-strip">
+          <div class="metric-box">
+            <span class="metric-title">Precise Value Margin</span>
+            <span class="metric-val pass" id="marginVal">-- mV</span>
+            <span class="metric-sub" id="marginPctSub">Slack: --%</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-title">Worst-Case IR Drop</span>
+            <span class="metric-val" id="maxDropVal">-- mV</span>
+            <span class="metric-sub" id="dropLimitSub">Target: 50.0 mV</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-title">Min Voltage V<sub>min</sub></span>
+            <span class="metric-val" id="minVoltageVal">-- V</span>
+            <span class="metric-sub" id="minAllowedSub">Allowed: 0.950 V</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-title">Safe Current Budget</span>
+            <span class="metric-val" id="safeCurrentVal">-- mA</span>
+            <span class="metric-sub" id="currentHeadroomSub">Headroom: -- mA</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-title">Safe Power Budget</span>
+            <span class="metric-val" id="safePowerVal">-- W</span>
+            <span class="metric-sub" id="currentPowerSub">Operating: -- W</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-title">Effective Resistance</span>
+            <span class="metric-val" id="effResVal">-- Ω</span>
+            <span class="metric-sub" id="peakResSub">Peak: -- Ω</span>
+          </div>
+        </div>
+
+        <!-- Dynamic Current Operating Budget Meter -->
+        <div class="budget-meter-container" id="budgetMeterContainer">
+          <div class="budget-meter-header">
+            <span class="label">PDN Supply Current Utilization</span>
+            <span class="val" id="budgetMeterRatio">Operating: 0 mA / Safe Budget: 0 mA (0%)</span>
+          </div>
+          <div class="budget-meter-bar">
+            <div class="budget-meter-fill safe" id="budgetMeterFill" style="width: 0%;"></div>
+          </div>
+        </div>
+
+        <!-- Real-Time "What-If" Sensitivity Simulator Panel -->
+        <div class="what-if-panel" id="whatIfPanel" style="display:none;">
+          <div class="what-if-header">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:0.75rem; color:var(--accent-cyan); font-weight:800;">&gt; WHAT-IF CURRENT SENSITIVITY SWEEPER:</span>
+              <span style="font-size:0.7rem; color:var(--text-muted);">(Linear PDN Headroom Scaling)</span>
+            </div>
+            <button class="pill-btn" onclick="resetWhatIf()">RESET 100%</button>
+          </div>
+          <div class="what-if-body">
+            <input type="range" id="whatIfSlider" class="range-slider" min="20" max="250" step="5" value="100" oninput="onWhatIfSlide(this.value)" style="flex:1;">
+            <span class="what-if-scale-tag" id="whatIfScaleVal">100%</span>
+            <div class="what-if-stats">
+              <span>Current: <b id="whatIfCurr">400 mA</b></span>
+              <span>Drop: <b id="whatIfDrop">-- mV</b></span>
+              <span>Margin: <b id="whatIfMargin">-- mV</b></span>
+            </div>
+            <button class="btn-terminal-action" onclick="applyWhatIf()">APPLY &amp; RE-SOLVE</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main Visualizer Card -->
+      <div class="viewer-card">
+        
+        <!-- Viewer Toolbar -->
+        <div class="viewer-toolbar">
+          <!-- View Modes -->
+          <div class="btn-group">
+            <button class="btn-toggle active" id="btnModeDrop" onclick="setHeatmapMode('ir_drop')">IR-Drop (ΔV)</button>
+            <button class="btn-toggle" id="btnModeVolt" onclick="setHeatmapMode('voltage')">Potential V(x,y)</button>
+            <button class="btn-toggle" id="btnModeSlack" onclick="setHeatmapMode('margin_slack')">Margin Slack</button>
+            <button class="btn-toggle" id="btnMode3D" onclick="setHeatmapMode('3d_surface')">3D Surface</button>
+            <button class="btn-toggle" id="btnModeFlow" onclick="setHeatmapMode('current_flow')">Current Flow</button>
+            <button class="btn-toggle" id="btnModeHist" onclick="setHeatmapMode('histogram')">Histogram</button>
+          </div>
+
+          <!-- Feature Toggles -->
+          <div class="toggles-inline">
+            <label><input type="checkbox" id="chkOverlay" checked onchange="refreshView()"> Wires</label>
+            <label><input type="checkbox" id="chkContours" checked onchange="refreshView()"> Contours</label>
+            <label><input type="checkbox" id="chkPads" checked onchange="refreshView()"> Pads</label>
+            <label><input type="checkbox" id="chkWorst" checked onchange="refreshView()"> Hotspot Pin</label>
+          </div>
+
+          <!-- Palette Selector -->
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span style="font-size:0.75rem; color:var(--text-muted);">Palette:</span>
+            <select id="cmapSelect" class="form-select" style="padding:3px 6px; font-size:0.75rem; width:auto;" onchange="refreshView()">
+              <option value="turbo" selected>Turbo</option>
+              <option value="inferno">Inferno</option>
+              <option value="plasma">Plasma</option>
+              <option value="viridis">Viridis</option>
+              <option value="jet">Jet</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Heatmap Stage: PURE PITCH BLACK #000000 with Zoom/Pan & Overlays -->
+        <div class="heatmap-stage" id="heatmapStage">
+          <!-- Floating Pan/Zoom HUD -->
+          <div class="zoom-controls-hud" id="zoomControlsHud">
+            <button class="hud-btn" onclick="zoomIn()" title="Zoom In (+)">+</button>
+            <span class="hud-zoom-val" id="zoomLevelDisplay">100%</span>
+            <button class="hud-btn" onclick="zoomOut()" title="Zoom Out (−)">−</button>
+            <button class="hud-btn" onclick="resetZoom()" title="Reset Zoom">1:1</button>
+            <button class="hud-btn" onclick="fitZoom()" title="Fit View">FIT</button>
+          </div>
+
+          <!-- Heatmap Viewport -->
+          <div class="heatmap-viewport" id="heatmapViewport"
+               onmousedown="startPan(event)"
+               onmousemove="onViewportMouseMove(event)"
+               onmouseup="endPan(event)"
+               onmouseleave="endPan(event)"
+               onwheel="onViewportWheel(event)">
+            <div class="heatmap-canvas-wrapper" id="heatmapCanvasWrapper">
+              <img id="heatmapImage" class="heatmap-img" alt="IR-Drop Heatmap" src="" style="display:none;" draggable="false">
+              <!-- Interactive Cutline Laser Overlay -->
+              <div class="cutline-laser-line" id="cutlineLaserLine" style="display:none;">
+                <span class="cutline-laser-tag" id="cutlineLaserTag">Cutline Y = 50.0 µm</span>
+              </div>
+            </div>
+          </div>
+
+          <div id="stagePlaceholder" style="text-align:center; color:var(--text-muted); position:absolute;">
+            <div style="font-size:32px; margin-bottom:8px;">🗺️</div>
+            <div>Upload a GDSII file or select a benchmark above, then click <b>SOLVE IR-DROP NETWORK</b></div>
+          </div>
+
+          <!-- Hover Cursor Probe HUD -->
+          <div class="probe-hud" id="probeHud" style="display:none;">
+            <div class="probe-row"><span>Position (X, Y):</span><span class="val" id="probePos">-- µm</span></div>
+            <div class="probe-row"><span>IR Drop (ΔV):</span><span class="val" id="probeDrop">-- mV</span></div>
+            <div class="probe-row"><span>Voltage V(x,y):</span><span class="val" id="probeVolt">-- V</span></div>
+            <div class="probe-row"><span>Margin Slack:</span><span class="val" id="probeMargin">-- mV</span></div>
+          </div>
+
+          <!-- Loading Overlay -->
+          <div class="loading-overlay" id="loadingOverlay" style="display:none;">
+            <div class="spinner"></div>
+            <div style="font-size:0.85rem; font-weight:700; color:var(--accent-cyan);" id="loadingText">Solving PDN Network...</div>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="export-actions">
+          <button class="btn-secondary" onclick="downloadHeatmap()">
+            <span>📷 Export Plot (PNG)</span>
+          </button>
+          <button class="btn-secondary" onclick="exportCsv()">
+            <span>📊 Violations (CSV)</span>
+          </button>
+          <button class="btn-secondary" onclick="exportSignoffReport()">
+            <span>📄 Full Report (JSON)</span>
+          </button>
+          <button class="btn-secondary" onclick="exportHtmlReport()" style="border-color:var(--accent-cyan); color:var(--accent-cyan);">
+            <span>📋 Signoff Certificate</span>
+          </button>
+        </div>
+
+      </div>
+
+      <!-- Detail Tabs (Cutline, Hotspots, Layer Stats, Distribution) -->
+      <div class="viewer-card">
+        <div class="tabs-header">
+          <button class="tab-btn active" onclick="switchTab('cutlineTab')">📈 1D Voltage Cutline</button>
+          <button class="tab-btn" onclick="switchTab('hotspotsTab')">⚠️ Hotspots &amp; Violations</button>
+          <button class="tab-btn" onclick="switchTab('layersTab')">🥞 Layer Breakdown</button>
+          <button class="tab-btn" onclick="switchTab('statsTab')">📊 Statistical Distribution</button>
+        </div>
+
+        <!-- Tab 1: Cutline Profile -->
+        <div class="tab-content active" id="cutlineTab">
+          <div class="cutline-container">
+            <div class="cutline-controls">
+              <span>Cutline Y Position:</span>
+              <input type="range" id="cutlineYSlider" class="range-slider" min="0" max="100" value="50" oninput="updateCutlineY(this.value)" style="flex:1;">
+              <span class="val" id="cutlineYVal" style="color:var(--accent-cyan); font-weight:bold; min-width:60px;">50.0 µm</span>
+            </div>
+            <img id="cutlineImage" style="max-width:100%; border-radius:var(--radius-xs); border:1px solid var(--border-color);" alt="1D Cutline Profile">
+          </div>
+        </div>
+
+        <!-- Tab 2: Hotspots Table -->
+        <div class="tab-content" id="hotspotsTab">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Center (X, Y)</th>
+                <th>Bounding Box (µm)</th>
+                <th>Area (µm²)</th>
+                <th>Max Drop</th>
+                <th>Severity</th>
+              </tr>
+            </thead>
+            <tbody id="hotspotsTableBody">
+              <tr><td colspan="6" style="text-align:center; color:var(--text-muted);">No analysis executed yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Tab 3: Layers Breakdown -->
+        <div class="tab-content" id="layersTab">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Layer</th>
+                <th>Max Drop (mV)</th>
+                <th>Avg Drop (mV)</th>
+                <th>Layer Margin (mV)</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="layerStatsTableBody">
+              <tr><td colspan="5" style="text-align:center; color:var(--text-muted);">No analysis executed yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Tab 4: Stats -->
+        <div class="tab-content" id="statsTab">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+            <div>
+              <div style="font-size:0.75rem; font-weight:700; color:var(--accent-cyan); margin-bottom:8px; text-transform:uppercase;">📊 Voltage Drop Statistics</div>
+              <div class="info-row"><span class="info-label">Mean IR-Drop:</span><span class="info-val" id="statMean">--</span></div>
+              <div class="info-row"><span class="info-label">Standard Deviation (σ):</span><span class="info-val" id="statStd">--</span></div>
+              <div class="info-row"><span class="info-label">90th Percentile Drop (P90):</span><span class="info-val" id="statP90">--</span></div>
+              <div class="info-row"><span class="info-label">95th Percentile Drop (P95):</span><span class="info-val" id="statP95">--</span></div>
+              <div class="info-row"><span class="info-label">99th Percentile Drop (P99):</span><span class="info-val" id="statP99">--</span></div>
+            </div>
+            <div>
+              <div style="font-size:0.75rem; font-weight:700; color:var(--pass-green); margin-bottom:8px; text-transform:uppercase;">⚡ PDN Electrical Headroom</div>
+              <div class="info-row"><span class="info-label">Safe Current Budget:</span><span class="info-val" id="statSafeCurr">--</span></div>
+              <div class="info-row"><span class="info-label">Current Headroom:</span><span class="info-val" id="statHeadroom">--</span></div>
+              <div class="info-row"><span class="info-label">Safe Power Budget:</span><span class="info-val" id="statSafePower">--</span></div>
+              <div class="info-row"><span class="info-label">Effective PDN Resistance:</span><span class="info-val" id="statEffRes">--</span></div>
+              <div class="info-row"><span class="info-label">Peak Node Resistance:</span><span class="info-val" id="statPeakRes">--</span></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
