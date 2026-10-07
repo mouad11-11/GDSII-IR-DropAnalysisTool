@@ -27,6 +27,11 @@ def main():
     parser.add_argument("--output", type=str, default="report", help="Output directory for reports and plots")
     parser.add_argument("--no-overlay", action="store_true", help="Do not overlay layout wires on heatmaps")
     parser.add_argument("--no-contours", action="store_true", help="Do not draw isopotential contour lines")
+    parser.add_argument(
+        "--allow-default-pads",
+        action="store_true",
+        help="Allow default peripheral pad placement if no pads or C4 bumps are detected",
+    )
 
     args = parser.parse_args()
 
@@ -50,6 +55,7 @@ def main():
             total_current=args.current,
             distribution=args.dist,
             grid_resolution=(args.res, args.res),
+            allow_default_pads=args.allow_default_pads,
         )
     except Exception as e:
         print(f"Error during analysis: {e}", file=sys.stderr)
@@ -69,6 +75,10 @@ def main():
     print(f"  Worst node:           ({analysis.worst_node['x_um']:.1f}, {analysis.worst_node['y_um']:.1f}) um on Layer {analysis.worst_node['layer']}")
     print(f"  Violating area:       {analysis.violating_area_percentage:.2f}% ({analysis.violating_area_um2:.1f} um^2)")
     print(f"  Hotspot clusters:     {len(analysis.hotspots)}")
+    if analysis.warnings:
+        print("[WARNINGS]")
+        for w in analysis.warnings:
+            print(f"  * {w}")
 
     out_dir = Path(args.output)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -136,6 +146,7 @@ def main():
             for h in analysis.hotspots
         ],
         "layer_metrics": analysis.layer_metrics,
+        "warnings": analysis.warnings,
     }
     report_json = out_dir / f"{gds_path.stem}_report.json"
     with open(report_json, "w") as f:
@@ -145,7 +156,9 @@ def main():
 
     print(f"[INFO] Wrote report and figures to: {out_dir}")
 
-    if analysis.status == "VIOLATION":
+    if analysis.status == "INVALID":
+        sys.exit(1)
+    elif analysis.status == "VIOLATION":
         sys.exit(2)
     sys.exit(0)
 

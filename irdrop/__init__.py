@@ -16,10 +16,16 @@ def run_analysis(
     distribution: str = "uniform",
     grid_resolution: tuple[int, int] = (100, 100),
     layer_overrides: dict = None,
+    allow_default_pads: bool = False,
 ) -> tuple[GDSLayout, SolverResult, MarginAnalysisResult, IRDropVisualizer]:
     """Runs end-to-end IR-drop and precise margin analysis on a GDSII file."""
     layout = GDSLayout(gds_path)
-    builder = PDNBuilder(layout, grid_resolution=grid_resolution, layer_overrides=layer_overrides)
+    builder = PDNBuilder(
+        layout,
+        grid_resolution=grid_resolution,
+        layer_overrides=layer_overrides,
+        allow_default_pads=allow_default_pads,
+    )
     network = builder.build_network()
     solver = IRDropSolver(network)
     result = solver.solve(v_nom=v_nom, total_current=total_current, distribution=distribution)

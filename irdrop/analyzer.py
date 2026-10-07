@@ -71,6 +71,7 @@ class MarginAnalysisResult:
 
     # Detailed node violation list (for CSV export)
     violating_nodes: List[Dict[str, Any]] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
 
 
 class IRDropAnalyzer:
@@ -107,7 +108,20 @@ class IRDropAnalyzer:
         margin_mv = round(limit_mv - delta_v_max_mv, 3)
         margin_pct = round((margin_mv / max(limit_mv, 1e-6)) * 100.0, 2)
         is_safe = margin_mv >= 0.0
-        status = "PASS" if is_safe else "VIOLATION"
+
+        warnings = list(res.warnings)
+        has_blocking_warning = any(
+            "blocking" in w.lower() or "disconnected" in w.lower() or "floating" in w.lower() or "nan" in w.lower()
+            for w in warnings
+        )
+        if not res.converged:
+            has_blocking_warning = True
+
+        if has_blocking_warning:
+            status = "INVALID"
+            is_safe = False
+        else:
+            status = "PASS" if is_safe else "VIOLATION"
 
         # Worst node coordinates
         worst_r, worst_c = np.unravel_index(np.argmax(res.composite_ir_drop_v), res.composite_ir_drop_v.shape)
@@ -282,4 +296,5 @@ class IRDropAnalyzer:
             effective_pdn_resistance_ohm=effective_pdn_res,
             peak_pdn_resistance_ohm=peak_pdn_res,
             violating_nodes=violating_nodes_list,
+            warnings=warnings,
         )
