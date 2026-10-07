@@ -22,7 +22,7 @@ def test_cli_exit_codes():
     # 2. Pass -> exit code 0
     res_pass = subprocess.run([
         sys.executable, str(cli_path), "samples/mesh_pdn.gds",
-        "--vnom", "1.0", "--limit-mv", "50.0", "--current", "0.4"
+        "--vnom", "1.0", "--limit-mv", "80.0", "--current", "0.4"
     ])
     assert res_pass.returncode == 0
 

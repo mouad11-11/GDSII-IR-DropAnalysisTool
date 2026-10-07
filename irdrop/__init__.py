@@ -22,6 +22,8 @@ def run_analysis(
     allow_default_pads: bool = False,
     tech: Optional[Union[str, TechConfig]] = "default",
     guess_layers: bool = False,
+    target_net: str = "VDD",
+    net_layers: Optional[list[int]] = None,
 ) -> tuple[GDSLayout, SolverResult, MarginAnalysisResult, IRDropVisualizer]:
     """Runs end-to-end IR-drop and precise margin analysis on a GDSII file."""
     layout = GDSLayout(gds_path, tech=tech, guess_layers=guess_layers)
@@ -30,6 +32,8 @@ def run_analysis(
         grid_resolution=grid_resolution,
         layer_overrides=layer_overrides,
         allow_default_pads=allow_default_pads,
+        target_net=target_net,
+        net_layers=net_layers,
     )
     network = builder.build_network()
     solver = IRDropSolver(network)

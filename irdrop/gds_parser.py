@@ -340,10 +340,10 @@ class GDSLayout:
 
         return counts
 
-    def rasterize_layer(self, layer: int, grid_shape: Tuple[int, int]) -> np.ndarray:
+    def rasterize_layer(self, layer: int, grid_shape: Tuple[int, int], supersample: int = 4) -> np.ndarray:
         """
-        Rasterizes polygons on a specific layer into a 2D float occupancy grid of shape (ny, nx).
-        Value at (r, c) is between 0.0 and 1.0 (binary coverage or fraction).
+        Rasterizes polygons on a specific layer into a 2D float area-coverage fraction grid of shape (ny, nx).
+        Value at (r, c) is between 0.0 and 1.0, representing the fraction of the grid cell covered by metal.
         """
         ny, nx = grid_shape
         if layer not in self.polygons_by_layer or not self.polygons_by_layer[layer]:
@@ -352,30 +352,31 @@ class GDSLayout:
         min_x, min_y, max_x, max_y = self.bbox
         width = max(max_x - min_x, 1e-6)
         height = max(max_y - min_y, 1e-6)
+        dx = width / max(nx - 1, 1)
+        dy = height / max(ny - 1, 1)
 
-        # Scale factor from layout (microns) to raster pixels
-        scale_x = (nx - 1) / width
-        scale_y = (ny - 1) / height
-
-        # Create blank image for OpenCV
-        canvas = np.zeros((ny, nx), dtype=np.uint8)
+        S = max(1, int(supersample))
+        H = (ny - 1) * S + 1
+        W = (nx - 1) * S + 1
+        canvas = np.zeros((H, W), dtype=np.uint8)
 
         polys = self.polygons_by_layer[layer]
         cv_pts_list = []
         for poly in polys:
-            # Transform: x -> col, y -> row
-            px = np.clip((poly[:, 0] - min_x) * scale_x, 0, nx - 1)
-            py = np.clip((poly[:, 1] - min_y) * scale_y, 0, ny - 1)
+            px = np.clip(np.round((poly[:, 0] - min_x) / dx * S), 0, W - 1)
+            py = np.clip(np.round((poly[:, 1] - min_y) / dy * S), 0, H - 1)
             pts = np.column_stack((px, py)).astype(np.int32)
             cv_pts_list.append(pts)
 
         if cv_pts_list:
             cv2.fillPoly(canvas, cv_pts_list, color=255)
-            # Ensure sub-pixel thin wire boundaries and vias are preserved
-            cv2.polylines(canvas, cv_pts_list, isClosed=True, color=255, thickness=1)
 
-        # Normalize to 0.0 - 1.0
-        return (canvas / 255.0).astype(np.float32)
+        if S > 1:
+            downsampled = cv2.resize(canvas, (nx, ny), interpolation=cv2.INTER_AREA)
+        else:
+            downsampled = canvas
+
+        return (downsampled / 255.0).astype(np.float32)
 
     def get_summary(self) -> Dict[str, Any]:
         """Returns JSON-serializable layout metadata."""

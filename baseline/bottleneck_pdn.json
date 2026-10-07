@@ -3,59 +3,13 @@
   "v_nom": 1.0,
   "delta_v_limit_mv": 50.0,
   "min_allowed_voltage_v": 0.95,
-  "delta_v_max_mv": 68.23,
-  "min_observed_voltage_v": 0.9318,
-  "precise_margin_mv": -18.229,
-  "margin_percentage": -36.46,
+  "delta_v_max_mv": 144.74,
+  "min_observed_voltage_v": 0.8553,
+  "precise_margin_mv": -94.745,
+  "margin_percentage": -189.49,
   "status": "VIOLATION",
   "is_safe": false,
-  "max_safe_current_ma": 293.13,
-  "current_headroom_ma": -106.87,
-  "max_safe_power_w": 0.2931,
-  "effective_pdn_resistance_ohm": 0.0851,
-  "worst_node": {
-    "x_um": 250.0,
-    "y_um": 247.47,
-    "grid_r": 98,
-    "grid_c": 99,
-    "drop_mv": 68.23,
-    "voltage_v": 0.9318,
-    "layer": 1
-  },
-  "violating_area_percentage": 13.8,
-  "violating_area_um2": 3921.79,
-  "hotspots": [
-    {
-      "id": 1,
-      "bbox_um": [
-        121.21,
-        118.69,
-        250.0,
-        250.0
-      ],
-      "center_um": [
-        194.44,
-        186.87
-      ],
-      "area_um2": 13550.91,
-      "max_drop_mv": 68.23,
-      "violation_severity_mv": 18.23
-    }
-  ],
-  "layer_metrics": [
-    {
-      "layer": 1,
-      "max_drop_mv": 68.23,
-      "avg_drop_mv": 35.09,
-      "margin_mv": -18.23,
-      "status": "VIOLATION"
-    },
-    {
-      "layer": 3,
-      "max_drop_mv": 47.63,
-      "avg_drop_mv": 29.39,
-      "margin_mv": 2.37,
-      "status": "PASS"
-    }
-  ]
+  "violating_nodes": 3884,
+  "total_active_nodes": 5464,
+  "violating_area_percentage": 71.08
 }

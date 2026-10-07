@@ -298,6 +298,7 @@ fig.savefig("mesh_ir_drop.png", bbox_inches="tight", dpi=150)
 | `--limit-pct` | `float` | `None` | Drop tolerance expressed as percentage of $V_{\text{nom}}$ (e.g., `5.0` for 5%). |
 | `--current` | `float` | `0.4` | Total supply current load $I_{\text{total}}$ in Amperes. |
 | `--dist` | `choice` | `uniform` | Current load profile: `uniform`, `center_hotspot`, `dual_hotspot`, `quad_hotspot`. |
+| `--net` | `str` | `VDD` | Target power net to analyze (`VDD`, `VSS`, etc.). |
 | `--res` | `int` | `100` | Discretization grid resolution per axis ($N \times N$). |
 | `--output` | `str` | `report` | Directory where plots, CSV tables, and JSON manifests are saved. |
 | `--no-overlay` | `flag` | `False` | Disable rendering layout wireframe polygons on top of heatmaps. |
@@ -334,6 +335,7 @@ Test coverage includes:
 ├── cli.py                     # Headless command-line analysis interface
 ├── run.py                     # Web application server launcher
 ├── requirements.txt           # Python package dependencies
+├── pyproject.toml             # Project build and tool configurations
 ├── pytest.ini                 # Pytest discovery and pythonpath configuration
 ├── irdrop/                    # Core IR-drop analysis engine
 │   ├── __init__.py            # Package API entrypoint
@@ -342,7 +344,11 @@ Test coverage includes:
 │   ├── solver.py              # Sparse MNA solver & current distribution engine
 │   ├── analyzer.py            # Margin signoff metrics & connected component hotspot clustering
 │   ├── visualizer.py          # Matplotlib figures (2D heatmaps, 3D surfaces, cutlines)
+│   ├── tech.py                # Technology file and layer definition parser
 │   └── sample_generator.py    # Synthetic PDN layout generator
+├── tech/                      # Technology stack configurations
+│   ├── default.json           # Default 4-metal tier reference stack
+│   └── ihp_sg13g2.json        # IHP SG13G2 130nm 5-metal PDK stack
 ├── web/                       # Full-stack web dashboard
 │   ├── app.py                 # FastAPI backend, REST endpoints & report generation
 │   └── static/                # Pitch-black frontend interface (HTML, CSS, JS)
@@ -352,7 +358,11 @@ Test coverage includes:
 │   ├── bottleneck_pdn.gds     # Power network with induced via starvation
 │   └── ihp/                   # Open-source taped-out IHP SG13G2 silicon macros
 └── tests/                     # Unit and integration test suite
-    └── test_irdrop.py         # Test cases for engine, solver, and visualizer
+    ├── test_irdrop.py         # Test cases for engine, solver, and visualizer
+    ├── test_phase1.py         # Phase 1 correctness tests
+    ├── test_phase2.py         # Phase 2 strict fail-fast validation tests
+    ├── test_phase3.py         # Phase 3 tech file and layer mapping tests
+    └── test_phase4.py         # Phase 4 conductance and net selection tests
 ```
 
 ---

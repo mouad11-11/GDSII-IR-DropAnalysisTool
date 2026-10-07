@@ -68,6 +68,8 @@ class AnalysisRequest(BaseModel):
     grid_resolution: int = 100
     tech: str = "default"
     guess_layers: bool = False
+    target_net: str = "VDD"
+    net_layers: Optional[List[int]] = None
     layer_overrides: Optional[Dict[str, Dict[str, Any]]] = None
     heatmap_mode: str = "ir_drop"
     show_layout_overlay: bool = True
@@ -244,6 +246,8 @@ def run_analysis_endpoint(req: AnalysisRequest):
         grid_resolution=(res, res),
         layer_overrides=overrides,
         allow_default_pads=req.allow_default_pads,
+        target_net=req.target_net,
+        net_layers=req.net_layers,
     )
     network = builder.build_network()
 

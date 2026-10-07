@@ -1,6 +1,7 @@
 """PDN resistive mesh model and conductance matrix builder."""
 
 from dataclasses import dataclass, field
+import re
 from typing import Any, Dict, List, Optional, Tuple, Set
 import numpy as np
 import scipy.sparse as sp
@@ -34,6 +35,8 @@ class PDNBuilder:
         grid_resolution: Tuple[int, int] = (100, 100),
         layer_overrides: Optional[Dict[int, Dict[str, Any]]] = None,
         allow_default_pads: bool = False,
+        target_net: str = "VDD",
+        net_layers: Optional[List[int]] = None,
     ):
         """
         Args:
@@ -42,11 +45,15 @@ class PDNBuilder:
             layer_overrides: Optional dictionary of layer settings:
                 {layer_id: {'role': 'metal'|'via'|'pad'|'ignore', 'sheet_res': float, 'via_res': float}}
             allow_default_pads: Whether to allow falling back to default boundary pads if none found
+            target_net: Target net name (e.g. 'VDD', 'VSS')
+            net_layers: Optional list of layer IDs to include for the target net
         """
         self.layout = layout
         self.ny, self.nx = grid_resolution
         self.layer_overrides = layer_overrides or {}
         self.allow_default_pads = allow_default_pads
+        self.target_net = target_net
+        self.net_layers = net_layers
         
         # Apply layer overrides
         for layer, props in self.layer_overrides.items():
@@ -71,6 +78,10 @@ class PDNBuilder:
         metal_layers = [l for l, info in sorted(self.layout.layers.items()) if info.role == "metal"]
         via_layers = [l for l, info in sorted(self.layout.layers.items()) if info.role == "via"]
         pad_layers = [l for l, info in sorted(self.layout.layers.items()) if info.role == "pad"]
+
+        if self.net_layers:
+            metal_layers = [l for l in metal_layers if l in self.net_layers]
+            via_layers = [l for l in via_layers if l in self.net_layers]
 
         # Fallback if no metal layers are classified
         if not metal_layers:
@@ -105,7 +116,8 @@ class PDNBuilder:
             node_has_connection[idx1] = True
             node_has_connection[idx2] = True
 
-        # Intra-layer metal conductances
+        # Intra-layer metal conductances derived from wire width:
+        # Effective edge conductance G = (dy / dx / Rsheet) * occ_eff
         for m_idx, layer in enumerate(metal_layers):
             occ = occupancies[layer]
             r_sq = max(self.layout.layers[layer].sheet_resistance, 1e-4)
@@ -115,16 +127,18 @@ class PDNBuilder:
 
             for r in range(self.ny):
                 for c in range(self.nx - 1):
-                    c_eff = min(occ[r, c], occ[r, c + 1])
-                    if c_eff > 0.01:
+                    o1, o2 = occ[r, c], occ[r, c + 1]
+                    if o1 > 1e-4 and o2 > 1e-4:
+                        c_eff = (2.0 * o1 * o2) / (o1 + o2)
                         idx1 = get_node_idx(m_idx, r, c)
                         idx2 = get_node_idx(m_idx, r, c + 1)
                         add_resistor(idx1, idx2, g_factor_x * c_eff)
 
             for r in range(self.ny - 1):
                 for c in range(self.nx):
-                    c_eff = min(occ[r, c], occ[r + 1, c])
-                    if c_eff > 0.01:
+                    o1, o2 = occ[r, c], occ[r + 1, c]
+                    if o1 > 1e-4 and o2 > 1e-4:
+                        c_eff = (2.0 * o1 * o2) / (o1 + o2)
                         idx1 = get_node_idx(m_idx, r, c)
                         idx2 = get_node_idx(m_idx, r + 1, c)
                         add_resistor(idx1, idx2, g_factor_y * c_eff)
@@ -193,7 +207,12 @@ class PDNBuilder:
                         pad_nodes_set.add(idx)
 
         min_x, min_y, max_x, max_y = self.layout.bbox
-        for lbl in self.layout.pad_labels:
+        net_pattern = re.compile(rf'(?:^|[^A-Za-z0-9]){re.escape(self.target_net)}(?:$|[^A-Za-z0-9])', re.IGNORECASE)
+        matching_labels = [lbl for lbl in self.layout.pad_labels if net_pattern.search(lbl["text"])]
+        if not matching_labels:
+            matching_labels = self.layout.pad_labels
+
+        for lbl in matching_labels:
             c = int(np.clip((lbl["x"] - min_x) / self.dx, 0, self.nx - 1))
             r = int(np.clip((lbl["y"] - min_y) / self.dy, 0, self.ny - 1))
             lbl_metal_idx = top_metal_idx
@@ -228,7 +247,7 @@ class PDNBuilder:
         for r in range(self.ny):
             for c in range(self.nx):
                 idx = get_node_idx(0, r, c)
-                if m0_occ[r, c] > 0.05 and node_has_connection[idx]:
+                if m0_occ[r, c] > 0.01 and node_has_connection[idx]:
                     sink_nodes.append(idx)
 
         if not sink_nodes:

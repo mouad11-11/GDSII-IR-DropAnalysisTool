@@ -39,6 +39,12 @@ def main():
         help="Enable heuristic guessing for layers not defined in the technology configuration (warns when triggered)",
     )
     parser.add_argument(
+        "--net",
+        type=str,
+        default="VDD",
+        help="Target power net name (default: 'VDD')",
+    )
+    parser.add_argument(
         "--allow-default-pads",
         action="store_true",
         help="Allow default peripheral pad placement if no pads or C4 bumps are detected",
@@ -56,7 +62,7 @@ def main():
         limit_mv = (args.limit_pct / 100.0) * args.vnom * 1000.0
 
     print(f"[INFO] Reading layout: {gds_path.name}")
-    print(f"[INFO] Config: Tech={args.tech}, Vnom={args.vnom:.3f}V, Limit={limit_mv:.1f}mV, Itotal={args.current * 1000:.1f}mA, Dist={args.dist}, Grid={args.res}x{args.res}")
+    print(f"[INFO] Config: Tech={args.tech}, Net={args.net}, Vnom={args.vnom:.3f}V, Limit={limit_mv:.1f}mV, Itotal={args.current * 1000:.1f}mA, Dist={args.dist}, Grid={args.res}x{args.res}")
 
     try:
         layout, result, analysis, visualizer = run_analysis(
@@ -69,6 +75,7 @@ def main():
             allow_default_pads=args.allow_default_pads,
             tech=args.tech,
             guess_layers=args.guess_layers,
+            target_net=args.net,
         )
     except Exception as e:
         print(f"Error during analysis: {e}", file=sys.stderr)

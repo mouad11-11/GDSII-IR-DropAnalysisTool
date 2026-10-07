@@ -70,8 +70,12 @@ class IRDropSolver:
             c = rem % nx
             x = x_coords[c]
             y = y_coords[r]
-
             weight = 1.0
+            m0_layer = net.metal_layers[0]
+            if m0_layer in net.layer_occupancy:
+                m0_occ = net.layer_occupancy[m0_layer][r, c]
+                weight *= max(float(m0_occ), 0.01)
+
             norm_x = (x - min_x) / (max_x - min_x + 1e-9)
             norm_y = (y - min_y) / (max_y - min_y + 1e-9)
 
