@@ -468,7 +468,7 @@ def export_report(file_id: str):
     }
 
     report = {
-        "project": "GDSII IR-Drop Analysis & Signoff",
+        "project": "GDSII IR-Drop Physical Estimator",
         "file": session["filename"],
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
         "nominal_voltage_v": analysis.v_nom,
@@ -538,7 +538,7 @@ def export_csv(file_id: str):
     )
 
     csv_lines = [
-        "# VoltDrop GDSII - Signoff Report CSV",
+        "# VoltDrop GDSII - IR-Drop Estimation Report CSV",
         f"# File: {session['filename']}",
         f"# Nominal Voltage (V): {analysis.v_nom}",
         f"# Tolerance Limit (mV): {analysis.delta_v_limit_mv}",
@@ -627,13 +627,13 @@ def export_html_report(file_id: str):
 
     if analysis.status == "INVALID":
         status_class = "violation"
-        status_label = "SIGNOFF INVALID (BLOCKING WARNINGS)"
+        status_label = "ESTIMATION INVALID (BLOCKING WARNINGS)"
     elif analysis.is_safe:
         status_class = "pass"
-        status_label = "SIGNOFF APPROVED (PASS)"
+        status_label = "ESTIMATION APPROVED (PASS)"
     else:
         status_class = "violation"
-        status_label = "SIGNOFF VIOLATION (FAIL)"
+        status_label = "ESTIMATION VIOLATION (FAIL)"
 
     margin_sign = "+" if analysis.margin_mv >= 0 else ""
 
@@ -641,7 +641,7 @@ def export_html_report(file_id: str):
     if analysis.warnings:
         warning_box = """
         <div style="background: rgba(255, 170, 0, 0.08); border: 1px solid #ffaa00; border-radius: 4px; padding: 12px 16px; margin-bottom: 20px;">
-            <div style="color: #ffaa00; font-weight: 700; margin-bottom: 6px;">[SIGNOFF INTEGRITY WARNINGS]</div>
+            <div style="color: #ffaa00; font-weight: 700; margin-bottom: 6px;">[ESTIMATION INTEGRITY WARNINGS]</div>
             <ul style="margin: 0; padding-left: 18px; color: #f1f5f9; font-size: 12px;">
         """ + "".join(f"<li>{html.escape(w)}</li>" for w in analysis.warnings) + "</ul></div>"
 
@@ -685,7 +685,7 @@ def export_html_report(file_id: str):
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>VoltDrop GDSII - Signoff Certificate [{filename}]</title>
+    <title>VoltDrop GDSII - Estimation Certificate [{filename}]</title>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&display=swap" rel="stylesheet">
     <style>
         * {{ box-sizing: border-box; font-family: 'JetBrains Mono', Consolas, monospace; }}
@@ -728,7 +728,7 @@ def export_html_report(file_id: str):
 
     <div class="header">
         <div>
-            <div class="title">&gt; VOLTDROP_GDSII :: SIGNOFF REPORT</div>
+            <div class="title">&gt; VOLTDROP_GDSII :: ESTIMATION REPORT</div>
             <div class="meta">PHYSICAL PDN EXTRACTION • PRECISE VALUE MARGIN VERIFICATION</div>
             <div class="meta" style="margin-top:6px;">Layout: <b>{filename}</b> | Verified: {timestamp}</div>
         </div>
@@ -816,7 +816,7 @@ def export_html_report(file_id: str):
                 <th>Max Drop (mV)</th>
                 <th>Avg Drop (mV)</th>
                 <th>Layer Margin Slack</th>
-                <th>Signoff Status</th>
+                <th>Estimation Status</th>
             </tr>
         </thead>
         <tbody>
@@ -825,7 +825,7 @@ def export_html_report(file_id: str):
     </table>
 
     <div style="text-align:center; font-size:10px; color:#64748b; margin-top:20px; border-top:1px solid #172233; padding-top:15px;">
-        VoltDrop GDSII Verification Report
+        VoltDrop GDSII Estimation Report
     </div>
 </body>
 </html>"""

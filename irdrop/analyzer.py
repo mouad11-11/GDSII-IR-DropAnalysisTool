@@ -1,4 +1,4 @@
-"""IR-drop signoff analyzer and margin calculator."""
+"""IR-drop analyzer and margin estimator."""
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple

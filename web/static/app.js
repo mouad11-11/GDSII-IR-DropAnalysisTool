@@ -329,7 +329,7 @@ function renderAnalysisResults(data) {
   const verdictEl = document.getElementById("signoffVerdictText");
   if (verdictEl) {
     verdictEl.innerText = a.is_safe
-      ? "DESIGN MEETS ALL SIGNOFF MARGIN RULES"
+      ? "DESIGN MEETS ALL ESTIMATION MARGIN RULES"
       : "IR-DROP EXCEEDS MARGIN LIMIT! TIMING RISKS DETECTED";
     verdictEl.style.color = a.is_safe ? "var(--pass-green)" : "var(--fail-red)";
   }

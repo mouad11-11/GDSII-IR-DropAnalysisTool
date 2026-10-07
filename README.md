@@ -7,9 +7,11 @@
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey.svg?style=flat-square)]()
 [![CI](https://github.com/mouad11-11/GDSII-IR-DropAnalysisTool/actions/workflows/ci.yml/badge.svg)](https://github.com/mouad11-11/GDSII-IR-DropAnalysisTool/actions/workflows/ci.yml)
 
-Static IR-drop analysis and margin signoff verification engine for physical layouts.
+Physical power delivery network (PDN) IR-drop estimator and margin verification tool for integrated circuit layouts.
 
-VoltDrop parses standard GDSII stream files (`.gds`, `.gds2`), extracts multi-tier metal interconnects and inter-layer via arrays, models the physical power delivery network (PDN) as a 3D resistive conductance mesh, and solves the system using sparse Modified Nodal Analysis (MNA). It evaluates voltage drop margins against user-defined signoff thresholds, determines current budgets and safe headroom, clusters spatial hotspot violations, and delivers both an interactive dark web viewer and a scriptable CLI for automated signoff regressions.
+VoltDrop GDSII directly extracts multi-tier metal interconnects and via arrays from standard GDSII stream files (`.gds`, `.gds2`), builds a 3D resistive mesh with width-aware edge conductances, and solves for node potentials using Modified Nodal Analysis (MNA) with an AMG-preconditioned Conjugate Gradient solver. It evaluates voltage drop margins against user-defined thresholds, clusters spatial hotspots using connected components, and provides both an interactive dark terminal web interface and an automated CLI for regressions.
+
+> **Tool Positioning:** VoltDrop GDSII is an **early-stage physical estimator** intended for rapid PDN screening, floorplan verification, and power strap sanity checks directly on layout polygons. For tapeout signoff comparisons with OpenROAD PSM and analytic benchmarks, refer to [docs/VALIDATION.md](docs/VALIDATION.md).
 
 ---
 
@@ -17,6 +19,7 @@ VoltDrop parses standard GDSII stream files (`.gds`, `.gds2`), extracts multi-ti
 
 - [Pipeline Architecture](#pipeline-architecture)
 - [Mathematical Formulation](#mathematical-formulation)
+- [Validation & Tool Positioning](#validation--tool-positioning)
 - [Features](#features)
 - [Benchmark Layouts](#benchmark-layouts)
 - [Installation](#installation)
@@ -25,6 +28,7 @@ VoltDrop parses standard GDSII stream files (`.gds`, `.gds2`), extracts multi-ti
   - [Command-Line Interface](#command-line-interface)
   - [Python API](#python-api)
 - [CLI Reference](#cli-reference)
+- [Technology Configuration](#technology-configuration)
 - [Test Suite](#test-suite)
 - [Repository Structure](#repository-structure)
 - [License](#license)
@@ -42,28 +46,29 @@ VoltDrop parses standard GDSII stream files (`.gds`, `.gds2`), extracts multi-ti
              v
    +-------------------+       +----------------------+
    | Hierarchical      | ----> | 2D Rasterization     |
-   | Polygon Extractor |       | Grid Discretization  |
+   | Polygon Extractor |       | Area Coverage Matrix |
    | (gdstk)           |       | (OpenCV)             |
    +-------------------+       +----------+-----------+
                                           |
                                           v
    +-------------------+       +----------------------+
    | Boundary & Source | ----> | 3D Conductance Mesh  |
-   | Definitions       |       | (gx, gy, gvia)       |
-   | (Pads / C4 / Sinks|       +----------+-----------+
-   +-------------------+                  |
+   | Definitions       |       | Harmonic Width Model |
+   | (Pads / C4 / Sinks)       | (gx, gy, gvia)       |
+   +-------------------+       +----------+-----------+
+                                          |
                                           v
                                +----------------------+
-                               | Sparse MNA Matrix    |
-                               | G * V = I            |
-                               | (scipy.sparse)       |
+                               | Sparse Linear System |
+                               | Dirichlet Reduction  |
+                               | AMG-CG / direct      |
                                +----------+-----------+
                                           |
                                           v
                                +----------------------+
-                               | Margin Signoff &     |
+                               | Margin Estimation &  |
                                | Hotspot Clustering   |
-                               | (Slack, Headroom)    |
+                               | (Connected Comp.)    |
                                +----------+-----------+
                                           |
                         +-----------------+-----------------+
@@ -72,7 +77,7 @@ VoltDrop parses standard GDSII stream files (`.gds`, `.gds2`), extracts multi-ti
              +--------------------+              +--------------------+
              | Pitch-Black Web UI |              | CLI Batch Engine   |
              | Heatmaps, Cutlines |              | Plots, CSV, JSON   |
-             | Signoff Report     |              | Signoff Verification
+             | Provenance Report  |              | Automated Exit 0/2 |
              +--------------------+              +--------------------+
 ```
 
@@ -82,83 +87,87 @@ VoltDrop parses standard GDSII stream files (`.gds`, `.gds2`), extracts multi-ti
 
 ### 1. Admittance Matrix Assembly
 
-VoltDrop discretizes layout metal layers into a uniform 2D grid per layer connected vertically by via contacts. The node potentials are governed by the Modified Nodal Analysis (MNA) linear system:
+VoltDrop discretizes metal layers into a 2D grid per tier connected vertically through via layers. Enforcing Kirchhoff's Current Law (KCL) yields the Modified Nodal Analysis (MNA) system:
 
 $$G \mathbf{v} = \mathbf{i}$$
 
 Where:
 - $G \in \mathbb{R}^{N \times N}$ is the sparse, symmetric positive-definite conductance matrix.
-- $\mathbf{v} \in \mathbb{R}^N$ is the unknown electrical potential vector across all discretized grid nodes.
-- $\mathbf{i} \in \mathbb{R}^N$ is the nodal current injection/sink vector.
+- $\mathbf{v} \in \mathbb{R}^N$ is the nodal electrical potential vector.
+- $\mathbf{i} \in \mathbb{R}^N$ is the current injection and sink vector.
 
-### 2. Physical Conductance Equations
+### 2. Geometry-Aware Conductances
 
-Intra-layer sheet resistance $R_\square$ defines horizontal and vertical conductances between neighboring grid cells $(x, y)$ of dimensions $\Delta x$ and $\Delta y$:
+Intra-layer conductances account for wire width and partial cell occupancy using harmonic-mean effective conductances between adjacent cells:
 
-$$g_x = \frac{1}{R_\square} \cdot \frac{\Delta y}{\Delta x}, \quad g_y = \frac{1}{R_\square} \cdot \frac{\Delta x}{\Delta y}$$
+$$g_x = \frac{1}{R_\square} \cdot \frac{\Delta y}{\Delta x} \cdot c_{\text{eff}, x}, \quad g_y = \frac{1}{R_\square} \cdot \frac{\Delta x}{\Delta y} \cdot c_{\text{eff}, y}$$
 
-Inter-layer conduction between overlapping metal polygons through via contacts with lumped resistance $R_{\text{via}}$ is modeled as:
+Where $c_{\text{eff}} = \frac{2 \cdot o_1 \cdot o_2}{o_1 + o_2}$ for cells with fractional area coverage $o_1, o_2$.
 
-$$g_{\text{via}} = \frac{1}{R_{\text{via}}}$$
+Inter-layer via conductance between overlapping metal polygons uses explicit via cut counting from the layout or stack adjacency definitions:
 
-### 3. Boundary Conditions & Current Injection
+$$g_{\text{via}} = \frac{N_{\text{cuts}}}{R_{\text{via}}}$$
 
-- **Dirichlet Boundary (Supply Pads / C4 Bumps):** Node potentials at designated pad locations $\mathcal{P}$ are pinned to the nominal supply voltage:
-  $$V_p = V_{\text{nom}}, \quad \forall p \in \mathcal{P}$$
-- **Neumann Boundary (Active Current Sinks):** Current loads are distributed across active standard cell rails $\mathcal{S}$ on bottom metal (M1), satisfying conservation of total current:
-  $$\sum_{s \in \mathcal{S}} I_s = I_{\text{total}}$$
-  Supported spatial load distributions include uniform, central hotspot, dual hotspot, and quad hotspot profiles.
+### 3. Boundary Conditions & Numerical Solving
 
-### 4. Margin Signoff & Reliability Metrics
+- **Dirichlet Boundary Nodes (Pads & Bumps):** Known supply potentials are eliminated into the right-hand side vector:
+  $$A_{UU} \mathbf{v}_U = \mathbf{i}_U - G_{UD} \mathbf{v}_D$$
+  This preserves the strict symmetric positive-definite (SPD) property of the active submatrix $A_{UU}$.
+- **Iterative and Direct Solvers:** Grids with fewer than 5,000 unknowns default to direct sparse factorization (`spsolve`). Larger systems leverage Algebraic Multigrid preconditioned Conjugate Gradient (`pyamg` + `scipy.sparse.linalg.cg`) with automatic residual verification.
+- **Current Load Modeling:** Total current $I_{\text{total}}$ is distributed across active bottom-metal rails according to cell area weights or user-defined hotspot bounding boxes.
+
+### 4. Margin Reliability Metrics
 
 - **Nodal IR Drop:**
   $$\Delta V_k = V_{\text{nom}} - V_k$$
 - **Absolute Voltage Margin:**
   $$\text{Margin } (\text{mV}) = \Delta V_{\text{limit}} - \Delta V_{\text{max}}$$
-  A positive margin indicates signoff compliance (`PASS`), while a negative margin indicates a threshold violation (`VIOLATION`).
+  A positive margin indicates compliance (`PASS`), while a negative margin indicates a threshold violation (`VIOLATION`).
 - **Margin Slack Ratio:**
   $$\text{Slack Ratio } (\%) = \frac{\Delta V_{\text{limit}} - \Delta V_{\text{max}}}{\Delta V_{\text{limit}}} \times 100\%$$
 - **Maximum Safe Current Budget:**
   $$I_{\text{safe}} = I_{\text{total}} \cdot \left( \frac{\Delta V_{\text{limit}}}{\Delta V_{\text{max}}} \right)$$
-- **Current Headroom:**
-  $$\Delta I_{\text{headroom}} = I_{\text{safe}} - I_{\text{total}}$$
-- **Effective PDN Resistance:**
+- **Effective PDN Impedance:**
   $$R_{\text{eff}} = \frac{\Delta V_{\text{avg}}}{I_{\text{total}}}, \quad R_{\text{peak}} = \frac{\Delta V_{\text{max}}}{I_{\text{total}}}$$
+
+---
+
+## Validation & Tool Positioning
+
+VoltDrop GDSII is validated against both closed-form theoretical benchmarks and real silicon macros:
+
+1. **Analytic 1D Distributed Load:** Matches theoretical parabolic potential profile $\Delta V(x) = \frac{I R}{2} (\frac{2x}{L} - \frac{x^2}{L^2})$ within $0.5\%$.
+2. **Point-Load Verification:** Verifies Ohm's Law $V = I R$ on calibrated metal stripes within $0.2\%$.
+3. **OpenROAD PSM Correlation:** Evaluated against OpenROAD's Power Grid Meter (`analyze_power_grid`) on the open-source IHP SG13G2 digital counter macro (`counter_top.gds`). VoltDrop reproduces peak drop within $\sim 4\%$ and isolates identical core hotspot regions in under $1.5$ seconds ($29\times$ faster than full DEF/LEF/STA extraction).
+
+For detailed equations, convergence sweeps, and tool comparison tables, see [docs/VALIDATION.md](docs/VALIDATION.md).
 
 ---
 
 ## Features
 
-- **GDSII Stream Ingestion:** Native binary layout parsing through `gdstk` with boundary detection, cell reference flattening, and polygon rasterization via OpenCV.
-- **Multi-Tier 3D PDN Modeling:** Configurable per-layer sheet resistances ($R_\square$), via contact resistances ($R_{\text{via}}$), and pad/bump geometries (peripheral rings, staggered pads, or C4 bump area-arrays).
-- **Sparse Linear System Solver:** Memory-efficient Compressed Sparse Column (`csc_matrix`) admittance representation solved via direct sparse LU decomposition (`scipy.sparse.linalg.spsolve`).
-- **Comprehensive Margin Signoff:** Rigorous metrics for maximum drop, minimum rail voltage, average drop, variance, slack percentage, current headroom, and effective impedance.
-- **Hotspot Detection & Clustering:** Spatial grouping of violating nodes via 8-connectivity connected components to isolate critical power starvation regions, reporting total affected silicon area in $\mu\text{m}^2$ and percentage of active die.
-- **Multimodal Visualization:**
-  - 2D voltage drop ($\Delta V$) and absolute potential ($V$) distributions with optional layout wireframe overlay.
-  - Margin slack map indicating local pass/fail headroom.
-  - 1D cross-sectional cutline profiles along arbitrary X and Y axes.
-  - 3D perspective potential surfaces and current flow vector fields ($\vec{J} \propto -\nabla V$).
-  - Drop histogram with signoff threshold demarcation.
-- **Dual Operating Modes:**
-  - **Interactive Web Interface:** Pitch-black dark theme, terminal typography (`JetBrains Mono`), coordinate inspector, live parameter tuning, and printable signoff reports.
-  - **Scriptable CLI:** Deterministic headless execution, exit codes for CI/CD integration, and automated generation of plots, CSV violation tables, and JSON manifests.
+- **Direct GDSII Stream Parsing:** Ingests raw `.gds` and `.gds2` files using `gdstk` with boundary filtering, word-boundary net label detection, and polygon rasterization.
+- **Technology Layer Mapping:** JSON-based PDK definition files mapping `(layer, datatype)` pairs to stack order, sheet resistance, via resistance, and connectivity. Includes built-in support for generic CMOS stacks and IHP SG13G2 130nm BiCMOS.
+- **Accelerated Solver Engine:** AMG-preconditioned CG solver with Dirichlet boundary reduction and SciPy direct sparse fallback. Vectorized network building with NumPy slicing.
+- **Analysis Consistency:** Violations, spatial hotspots, and slack maps evaluate directly on active physical metal nodes.
+- **Hotspot Clustering:** 8-connectivity connected-component labeling isolates individual violation zones, reporting centroid coordinates, bounding boxes, and affected silicon area.
+- **Interactive Terminal Web Interface:** Pitch-black dark UI, terminal typography (`JetBrains Mono`), downsampled cursor probe, custom 1D cutlines, current headroom slider, and self-documenting provenance reports.
+- **Automated CI/CD Integration:** Scriptable CLI with standardized exit codes (`0` on pass, `2` on violation, `1` on error) and exports in CSV, JSON, PNG, and printable HTML.
 
 ---
 
 ## Benchmark Layouts
 
-The repository includes synthetic verification testcases and real taped-out silicon macros from the open-source IHP SG13G2 130nm BiCMOS PDK:
+The repository bundles calibrated synthetic testcases and taped-out silicon macros from the open-source IHP SG13G2 130nm BiCMOS PDK:
 
-| Benchmark File | Category | Metal Stack | Die Footprint | Description / Purpose |
-|---|---|---|---|---|
-| `samples/mesh_pdn.gds` | Synthetic | M1, M2, Via1 | 100 µm × 100 µm | Regular orthogonal power mesh with peripheral pad ring for baseline solver validation. |
-| `samples/hierarchical_pdn.gds` | Synthetic | M1–M4, Via1–Via3, C4 | 150 µm × 150 µm | 4-layer power distribution tree with a 4×4 C4 area-array bump grid. |
-| `samples/bottleneck_pdn.gds` | Synthetic | M1, M2, Via1 | 100 µm × 100 µm | Mesh containing localized via starvation and necked metal lines for margin violation testing. |
-| `samples/ihp/counter_top.gds` | Silicon PDK | TopLevel Standard Cell | Taped-out Macro | Synchronous 8-bit counter macro synthesized on IHP SG13G2 130nm process. |
-| `samples/ihp/inverter_top.gds` | Silicon PDK | TopLevel Standard Cell | Taped-out Macro | High-speed multi-stage inverter buffer chain from IHP SG13G2 PDK. |
-| `samples/ihp/sg13g2_ip__bondpad_70x70.gds` | Silicon PDK | TopMetal + Passivation | 70 µm × 70 µm | Calibrated 70 µm wire-bond pad cell for top-metal resistance extraction. |
-| `samples/ihp/chip_top.gds` | Silicon PDK | Full Chip Hierarchy | Multi-mm² Die | Complete SoC top-level layout for large-scale hierarchical hierarchy parsing. |
+| Benchmark File | Category | Metal Stack | Footprint | Description / Purpose |
+| :--- | :--- | :--- | :--- | :--- |
+| `samples/mesh_pdn.gds` | Synthetic | M1, M2, Via1 | 100 × 100 µm | Regular orthogonal power mesh with peripheral pad ring. |
+| `samples/hierarchical_pdn.gds` | Synthetic | M1–M4, Via1–Via3, C4 | 150 × 150 µm | 4-layer power distribution tree with a 4×4 C4 bump grid. |
+| `samples/bottleneck_pdn.gds` | Synthetic | M1, M2, Via1 | 100 × 100 µm | Defective PDN with induced via starvation and pinched stripes. |
+| `samples/ihp/counter_top.gds` | IHP SG13G2 | 7-Metal Stack | 120 × 120 µm | Taped-out digital 8-bit counter macro with scan chain. |
+| `samples/ihp/inverter_top.gds` | IHP SG13G2 | 7-Metal Stack | 65 × 45 µm | Analog/mixed-signal multi-stage inverter buffer chain. |
+| `samples/ihp/sg13g2_ip__bondpad_70x70.gds` | IHP SG13G2 | TopMetal + Passiv. | 70 × 70 µm | Calibrated 70 µm wire-bond pad cell. |
 
 ---
 
@@ -166,28 +175,28 @@ The repository includes synthetic verification testcases and real taped-out sili
 
 ### Prerequisites
 
-- Python 3.10 or higher
+- Python 3.10, 3.11, 3.12, or 3.13
 - Git
 
 ### Setup
-
-Clone the repository and install dependencies in an isolated virtual environment:
 
 ```bash
 git clone https://github.com/mouad11-11/GDSII-IR-DropAnalysisTool.git
 cd GDSII-IR-DropAnalysisTool
 
-# Create virtual environment
+# Create and activate virtual environment
 python -m venv .venv
 
-# Activate environment
-# On Linux / macOS:
+# Linux / macOS:
 source .venv/bin/activate
-# On Windows (PowerShell):
+# Windows (PowerShell):
 .venv\Scripts\Activate.ps1
 
-# Install requirements
+# Install runtime dependencies
 pip install -r requirements.txt
+
+# Install development dependencies (optional, for running tests)
+pip install -r requirements-dev.txt
 ```
 
 ---
@@ -196,19 +205,20 @@ pip install -r requirements.txt
 
 ### Web Interface
 
-Launch the interactive local server:
+Launch the local web server:
 
 ```bash
 python run.py
 ```
 
-Open `http://127.0.0.1:8000` in your browser. The web dashboard provides:
-- File upload for custom GDSII layouts or one-click loading of bundled benchmark files.
-- Real-time configuration of nominal voltage ($V_{\text{nom}}$), drop tolerance limit ($\Delta V_{\text{limit}}$), total current ($I_{\text{total}}$), and spatial load distributions.
-- Pitch-black layout canvas with pan, zoom, layer visibility toggles, and coordinate inspection.
-- Direct export of high-resolution PNG plots, CSV violation spreadsheets, structured JSON data, and printable HTML signoff reports.
+Navigate to `http://127.0.0.1:8000`. The interface provides:
+- Drag-and-drop GDSII upload with automatic file size sanitization.
+- PDK technology selector (`default`, `ihp_sg13g2`) with interactive layer sheet resistance overrides.
+- Multiple 2D visualization modes: IR-drop heatmap, margin slack map, absolute voltage, current flow vectors, and 3D surface view.
+- Interactive cursor voltage probe and 1D cross-sectional slice generator.
+- One-click export of CSV violation logs, JSON summaries, and printable HTML estimation certificates.
 
-To launch without automatically opening a browser window:
+To launch headless without opening a browser window:
 
 ```bash
 python run.py --no-browser --port 8080
@@ -218,7 +228,7 @@ python run.py --no-browser --port 8080
 
 ### Command-Line Interface
 
-VoltDrop provides a headless CLI for automated batch processing, regressions, and continuous integration:
+Run automated headless evaluations:
 
 ```bash
 # Baseline evaluation of standard power mesh
@@ -229,43 +239,46 @@ python cli.py samples/mesh_pdn.gds \
   --dist center_hotspot \
   --output report/
 
-# Margin violation signoff on bottleneck design
-python cli.py samples/bottleneck_pdn.gds \
-  --vnom 1.0 \
-  --limit-mv 45.0 \
-  --current 0.40 \
-  --output report/
+# Evaluation of IHP SG13G2 silicon macro using technology mapping
+python cli.py samples/ihp/counter_top.gds \
+  --tech ihp_sg13g2 \
+  --net VDD \
+  --vnom 1.2 \
+  --limit-mv 50.0 \
+  --current 0.05 \
+  --output report_ihp/
 
-# Hierarchical 4-layer PDN with fine discretization
+# Fine discretization with AMG-CG solver
 python cli.py samples/hierarchical_pdn.gds \
   --vnom 1.2 \
   --limit-mv 60.0 \
   --current 0.80 \
   --res 150 \
+  --solver amg \
   --output report_hierarchical/
 ```
 
-Generated output artifacts in `--output`:
-- `<name>_ir_drop_heatmap.png`: 2D spatial voltage drop heatmap with wire overlay and contours.
+Generated artifacts in `--output`:
+- `<name>_ir_drop_heatmap.png`: 2D spatial voltage drop heatmap with wire overlay.
 - `<name>_margin_slack_heatmap.png`: Signed margin slack map (green = safe, red = violation).
 - `<name>_3d_surface.png`: 3D potential surface perspective plot.
 - `<name>_histogram.png`: Nodal voltage drop distribution with limit threshold line.
 - `<name>_cutline_profile.png`: 1D orthogonal cross-sectional drop profiles.
-- `<name>_violations.csv`: Tabular coordinates and voltage metrics for violating nodes.
-- `<name>_report.json`: Machine-readable signoff summary and metadata.
+- `<name>_violations.csv`: Tabular coordinates and voltage metrics for violating nodes (sorted worst-first).
+- `<name>_report.json`: Machine-readable summary and metadata.
 
-Exit codes for CI/CD automation: `0` on signoff `PASS`, `2` on threshold `VIOLATION`, and `1` on invalid input or runtime error.
+**CI/CD Exit Codes:**
+- `0`: Analysis passed (all active nodes satisfy margin limit).
+- `2`: Threshold violation detected ($\Delta V_{\text{max}} > \Delta V_{\text{limit}}$).
+- `1`: Invalid input or execution error (e.g., floating sinks, missing pads).
 
 ---
 
 ### Python API
 
-VoltDrop can be embedded directly into custom physical design and analysis pipelines:
-
 ```python
 from irdrop import run_analysis
 
-# Execute end-to-end extraction and solving
 layout, result, analysis, visualizer = run_analysis(
     gds_path="samples/mesh_pdn.gds",
     v_nom=1.0,
@@ -273,15 +286,15 @@ layout, result, analysis, visualizer = run_analysis(
     total_current=0.35,
     distribution="center_hotspot",
     grid_resolution=(120, 120),
+    tech="default",
 )
 
-print(f"Status:             {analysis.status}")
-print(f"Max IR Drop:        {analysis.delta_v_max_mv:.2f} mV")
-print(f"Signoff Margin:     {analysis.margin_mv:+.2f} mV")
-print(f"Safe Current:       {analysis.max_safe_current_ma:.1f} mA")
-print(f"Effective PDN R:    {analysis.effective_pdn_resistance_ohm:.4f} Ohm")
+print(f"Status:          {analysis.status}")
+print(f"Max IR Drop:     {analysis.delta_v_max_mv:.2f} mV")
+print(f"Margin:          {analysis.margin_mv:+.2f} mV")
+print(f"Safe Current:    {analysis.max_safe_current_ma:.1f} mA")
+print(f"PDN Resistance:  {analysis.effective_pdn_resistance_ohm:.4f} Ohm")
 
-# Generate figures programmatically
 fig = visualizer.generate_heatmap_figure(mode="ir_drop")
 fig.savefig("mesh_ir_drop.png", bbox_inches="tight", dpi=150)
 ```
@@ -291,42 +304,75 @@ fig.savefig("mesh_ir_drop.png", bbox_inches="tight", dpi=150)
 ## CLI Reference
 
 | Flag | Type | Default | Description |
-|---|---|---|---|
+| :--- | :--- | :--- | :--- |
 | `gds_file` | `str` | *(required)* | Path to input GDSII layout file (`.gds` or `.gds2`). |
+| `--tech` | `str` | `default` | Technology file name (`default`, `ihp_sg13g2`) or path to custom JSON. |
+| `--net` | `str` | `VDD` | Target power net name to extract from labels. |
 | `--vnom` | `float` | `1.0` | Nominal supply voltage $V_{\text{nom}}$ in Volts. |
 | `--limit-mv` | `float` | `50.0` | IR drop tolerance threshold $\Delta V_{\text{limit}}$ in millivolts. |
-| `--limit-pct` | `float` | `None` | Drop tolerance expressed as percentage of $V_{\text{nom}}$ (e.g., `5.0` for 5%). |
+| `--limit-pct` | `float` | `None` | Drop tolerance expressed as percentage of $V_{\text{nom}}$. |
 | `--current` | `float` | `0.4` | Total supply current load $I_{\text{total}}$ in Amperes. |
 | `--dist` | `choice` | `uniform` | Current load profile: `uniform`, `center_hotspot`, `dual_hotspot`, `quad_hotspot`. |
-| `--net` | `str` | `VDD` | Target power net to analyze (`VDD`, `VSS`, etc.). |
-| `--res` | `int` | `100` | Discretization grid resolution per axis ($N \times N$). |
-| `--output` | `str` | `report` | Directory where plots, CSV tables, and JSON manifests are saved. |
+| `--res` | `int` | `100` | Grid resolution per axis ($N \times N$). |
+| `--solver` | `choice` | `auto` | Linear solver method: `auto`, `cg`, `amg`, `direct`. |
+| `--max-violations` | `int` | `1000` | Maximum number of violation rows in CSV (`0` for unlimited). |
+| `--allow-default-pads` | `flag` | `False` | Fallback to peripheral pads if no pads or C4 bumps are detected. |
+| `--guess-layers` | `flag` | `False` | Enable heuristic layer guessing for layers omitted from tech config. |
+| `--output` | `str` | `report` | Directory where output plots, CSVs, and JSON files are saved. |
 | `--no-overlay` | `flag` | `False` | Disable rendering layout wireframe polygons on top of heatmaps. |
 | `--no-contours`| `flag` | `False` | Disable drawing isopotential contour lines. |
-| `--tech` | `str` | `default` | Technology file name or JSON path (e.g., `default`, `ihp_sg13g2`). |
-| `--guess-layers` | `flag` | `False` | Enable heuristic layer guessing for layers omitted from technology configuration (warns when used). |
-| `--allow-default-pads` | `flag` | `False` | Allow default boundary pad fallback if no power pads or C4 bumps are detected. |
-| `--solver` | `choice` | `auto` | Linear system solver method: `auto`, `cg`, `amg`, `direct`. |
-| `--max-violations` | `int` | `1000` | Maximum number of violation nodes to export in CSV (0 for unlimited). |
+
+---
+
+## Technology Configuration
+
+PDK layer configurations are stored in `tech/<name>.json`. Example structure:
+
+```json
+{
+  "name": "ihp_sg13g2",
+  "description": "IHP SG13G2 130nm BiCMOS Open-Source PDK",
+  "layers": [
+    {
+      "layer": 8,
+      "datatype": 0,
+      "name": "Metal 1",
+      "role": "metal",
+      "stack_order": 0,
+      "sheet_resistance": 0.125
+    },
+    {
+      "layer": 19,
+      "datatype": 0,
+      "name": "Via 1",
+      "role": "via",
+      "via_resistance": 1.5,
+      "connects": [8, 10]
+    }
+  ]
+}
+```
 
 ---
 
 ## Test Suite
 
-The test suite validates GDSII parsing, multi-layer PDN mesh generation, sparse MNA matrix formulation, margin assertions (both pass and violation conditions), and figure generation.
-
-Run all tests:
+The test suite covers parser accuracy, tech stack classifications, width-aware conductances, AMG-CG solver convergence, and report generation:
 
 ```bash
 pytest -v
 ```
 
-Test coverage includes:
-- `test_gds_parser`: Validates polygon extraction, layer segregation, and bounding box computation.
-- `test_pdn_builder_and_solver`: Asserts grid mapping, boundary conditions, and sparse linear system convergence.
-- `test_precise_value_margin_pass`: Verifies margin calculations when maximum drop is strictly within tolerance limits.
-- `test_precise_value_margin_violation`: Confirms correct violation detection, hotspot clustering, and negative slack accounting.
-- `test_visualizer_figures`: Verifies generation of 2D heatmaps, 3D surface meshes, cutlines, and histograms.
+Test modules:
+- `test_irdrop.py`: Core PDN extraction, MNA solver, and visualization.
+- `test_phase1.py`: Correctness assertions and exit code verification.
+- `test_phase2.py`: Fail-fast boundary checks (missing pads, floating loads).
+- `test_phase3.py`: PDK tech mapping and via cut counting.
+- `test_phase4.py`: Width-aware conductance and analytic stripe drop.
+- `test_phase5.py`: SPD linear system reduction and AMG-CG performance.
+- `test_phase6.py`: Active-node analysis consistency and CSV sorting.
+- `test_phase7.py`: Backend web hardening, input validation, and session cleanup.
+- `test_phase8.py`: Analytic validation profiles and tool positioning checks.
 
 ---
 
@@ -336,23 +382,26 @@ Test coverage includes:
 .
 ├── cli.py                     # Headless command-line analysis interface
 ├── run.py                     # Web application server launcher
-├── requirements.txt           # Python package dependencies
-├── pyproject.toml             # Project build and tool configurations
-├── pytest.ini                 # Pytest discovery and pythonpath configuration
+├── requirements.txt           # Production runtime package dependencies
+├── requirements-dev.txt       # Development & test dependencies
+├── pyproject.toml             # Project build and metadata configuration
+├── pytest.ini                 # Pytest configuration
+├── docs/                      # Technical documentation
+│   └── VALIDATION.md          # Analytic benchmarks and OpenROAD PSM comparison
 ├── irdrop/                    # Core IR-drop analysis engine
 │   ├── __init__.py            # Package API entrypoint
 │   ├── gds_parser.py          # GDSII hierarchy extraction & polygon rasterization
 │   ├── pdn_model.py           # 3D resistive network & boundary condition builder
 │   ├── solver.py              # Sparse MNA solver & current distribution engine
-│   ├── analyzer.py            # Margin signoff metrics & connected component hotspot clustering
-│   ├── visualizer.py          # Matplotlib figures (2D heatmaps, 3D surfaces, cutlines)
+│   ├── analyzer.py            # Margin evaluation metrics & hotspot clustering
+│   ├── visualizer.py          # Matplotlib figure generators (2D, 3D, cutlines)
 │   ├── tech.py                # Technology file and layer definition parser
 │   └── sample_generator.py    # Synthetic PDN layout generator
 ├── tech/                      # Technology stack configurations
 │   ├── default.json           # Default 4-metal tier reference stack
 │   └── ihp_sg13g2.json        # IHP SG13G2 130nm 5-metal PDK stack
 ├── web/                       # Full-stack web dashboard
-│   ├── app.py                 # FastAPI backend, REST endpoints & report generation
+│   ├── app.py                 # FastAPI backend, REST endpoints & report exports
 │   └── static/                # Pitch-black frontend interface (HTML, CSS, JS)
 ├── samples/                   # Benchmark layouts
 │   ├── mesh_pdn.gds           # 2-layer orthogonal power mesh
@@ -366,7 +415,9 @@ Test coverage includes:
     ├── test_phase3.py         # Phase 3 tech file and layer mapping tests
     ├── test_phase4.py         # Phase 4 conductance and net selection tests
     ├── test_phase5.py         # Phase 5 solver and performance tests
-    └── test_phase6.py         # Phase 6 analysis consistency tests
+    ├── test_phase6.py         # Phase 6 analysis consistency tests
+    ├── test_phase7.py         # Phase 7 web hardening and provenance tests
+    └── test_phase8.py         # Phase 8 validation and positioning tests
 ```
 
 ---

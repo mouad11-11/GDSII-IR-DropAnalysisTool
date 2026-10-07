@@ -9,7 +9,7 @@ from irdrop import run_analysis
 
 def main():
     parser = argparse.ArgumentParser(
-        description="GDSII IR-drop analysis and margin signoff verification tool (exits 0 on PASS, 2 on VIOLATION, 1 on error)."
+        description="GDSII IR-drop physical estimator and margin verification tool (exits 0 on PASS, 2 on VIOLATION, 1 on error)."
     )
     parser.add_argument("gds_file", type=str, help="Path to input GDSII layout file (.gds / .gds2)")
     parser.add_argument("--vnom", type=float, default=1.0, help="Nominal supply voltage V_nom in Volts (default: 1.0)")
@@ -97,7 +97,7 @@ def main():
         sys.exit(1)
 
     print(f"[INFO] Solve finished in {result.solve_time_seconds:.3f}s")
-    print(f"[INFO] Signoff status: {analysis.status}")
+    print(f"[INFO] Estimation status: {analysis.status}")
     print(f"  Precise margin:       {analysis.margin_mv:+.2f} mV ({analysis.margin_percentage:+.1f}%)")
     print(f"  Max IR drop:          {analysis.delta_v_max_mv:.2f} mV")
     print(f"  Min observed voltage: {analysis.min_observed_voltage_v:.4f} V (Limit: {analysis.min_allowed_voltage_v:.4f} V)")

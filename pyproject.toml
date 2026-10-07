@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "voltdrop-gdsii"
 version = "0.1.0"
-description = "Static IR-drop analysis and margin signoff verification engine for physical layouts"
+description = "Physical PDN IR-drop and margin estimator for physical layouts"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
