@@ -1,0 +1,184 @@
+{
+  "name": "ihp_sg13g2",
+  "description": "IHP SG13G2 130nm BiCMOS Open-Source PDK layer and resistance mapping",
+  "layers": [
+    {
+      "layer": 8,
+      "datatype": 0,
+      "name": "Metal1",
+      "role": "metal",
+      "stack_order": 0,
+      "sheet_resistance": 0.085
+    },
+    {
+      "layer": 19,
+      "datatype": 0,
+      "name": "Via1",
+      "role": "via",
+      "via_resistance": 1.8,
+      "connects": [8, 10]
+    },
+    {
+      "layer": 10,
+      "datatype": 0,
+      "name": "Metal2",
+      "role": "metal",
+      "stack_order": 1,
+      "sheet_resistance": 0.085
+    },
+    {
+      "layer": 29,
+      "datatype": 0,
+      "name": "Via2",
+      "role": "via",
+      "via_resistance": 1.8,
+      "connects": [10, 30]
+    },
+    {
+      "layer": 30,
+      "datatype": 0,
+      "name": "Metal3",
+      "role": "metal",
+      "stack_order": 2,
+      "sheet_resistance": 0.085
+    },
+    {
+      "layer": 49,
+      "datatype": 0,
+      "name": "Via3",
+      "role": "via",
+      "via_resistance": 1.8,
+      "connects": [30, 50]
+    },
+    {
+      "layer": 50,
+      "datatype": 0,
+      "name": "Metal4",
+      "role": "metal",
+      "stack_order": 3,
+      "sheet_resistance": 0.085
+    },
+    {
+      "layer": 66,
+      "datatype": 0,
+      "name": "TopVia1",
+      "role": "via",
+      "via_resistance": 0.9,
+      "connects": [50, 67]
+    },
+    {
+      "layer": 67,
+      "datatype": 0,
+      "name": "TopMetal1",
+      "role": "metal",
+      "stack_order": 4,
+      "sheet_resistance": 0.035
+    },
+    {
+      "layer": 125,
+      "datatype": 0,
+      "name": "TopVia2",
+      "role": "via",
+      "via_resistance": 0.5,
+      "connects": [67, 126]
+    },
+    {
+      "layer": 126,
+      "datatype": 0,
+      "name": "TopMetal2",
+      "role": "metal",
+      "stack_order": 5,
+      "sheet_resistance": 0.015
+    },
+    {
+      "layer": 41,
+      "datatype": 0,
+      "name": "Passiv",
+      "role": "ignore"
+    },
+    {
+      "layer": 134,
+      "datatype": 0,
+      "name": "BondPad",
+      "role": "pad"
+    },
+    {
+      "layer": 189,
+      "datatype": 0,
+      "name": "prBoundary",
+      "role": "boundary"
+    },
+    {
+      "layer": 8,
+      "datatype": 2,
+      "name": "Metal1:pin",
+      "role": "pin"
+    },
+    {
+      "layer": 10,
+      "datatype": 2,
+      "name": "Metal2:pin",
+      "role": "pin"
+    },
+    {
+      "layer": 30,
+      "datatype": 2,
+      "name": "Metal3:pin",
+      "role": "pin"
+    },
+    {
+      "layer": 50,
+      "datatype": 2,
+      "name": "Metal4:pin",
+      "role": "pin"
+    },
+    {
+      "layer": 67,
+      "datatype": 2,
+      "name": "TopMetal1:pin",
+      "role": "pin"
+    },
+    {
+      "layer": 126,
+      "datatype": 2,
+      "name": "TopMetal2:pin",
+      "role": "pin"
+    },
+    {
+      "layer": 8,
+      "datatype": 25,
+      "name": "Metal1:label",
+      "role": "label"
+    },
+    {
+      "layer": 10,
+      "datatype": 25,
+      "name": "Metal2:label",
+      "role": "label"
+    },
+    {
+      "layer": 30,
+      "datatype": 25,
+      "name": "Metal3:label",
+      "role": "label"
+    },
+    {
+      "layer": 50,
+      "datatype": 25,
+      "name": "Metal4:label",
+      "role": "label"
+    },
+    {
+      "layer": 67,
+      "datatype": 25,
+      "name": "TopMetal1:label",
+      "role": "label"
+    },
+    {
+      "layer": 126,
+      "datatype": 25,
+      "name": "TopMetal2:label",
+      "role": "label"
+    }
+  ]
+}

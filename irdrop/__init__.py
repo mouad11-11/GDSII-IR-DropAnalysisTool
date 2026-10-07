@@ -2,11 +2,14 @@
 IR-Drop Analysis Package for GDSII Layouts.
 """
 
+from typing import Optional, Union
+
 from irdrop.gds_parser import GDSLayout, LayerInfo
 from irdrop.pdn_model import PDNBuilder, PDNNetwork
 from irdrop.solver import IRDropSolver, SolverResult
 from irdrop.analyzer import IRDropAnalyzer, MarginAnalysisResult, HotspotRegion
 from irdrop.visualizer import IRDropVisualizer
+from irdrop.tech import TechConfig, TechLayer, load_tech_file
 
 def run_analysis(
     gds_path: str,
@@ -17,9 +20,11 @@ def run_analysis(
     grid_resolution: tuple[int, int] = (100, 100),
     layer_overrides: dict = None,
     allow_default_pads: bool = False,
+    tech: Optional[Union[str, TechConfig]] = "default",
+    guess_layers: bool = False,
 ) -> tuple[GDSLayout, SolverResult, MarginAnalysisResult, IRDropVisualizer]:
     """Runs end-to-end IR-drop and precise margin analysis on a GDSII file."""
-    layout = GDSLayout(gds_path)
+    layout = GDSLayout(gds_path, tech=tech, guess_layers=guess_layers)
     builder = PDNBuilder(
         layout,
         grid_resolution=grid_resolution,
@@ -45,5 +50,8 @@ __all__ = [
     "MarginAnalysisResult",
     "HotspotRegion",
     "IRDropVisualizer",
+    "TechConfig",
+    "TechLayer",
+    "load_tech_file",
     "run_analysis",
 ]

@@ -302,6 +302,8 @@ fig.savefig("mesh_ir_drop.png", bbox_inches="tight", dpi=150)
 | `--output` | `str` | `report` | Directory where plots, CSV tables, and JSON manifests are saved. |
 | `--no-overlay` | `flag` | `False` | Disable rendering layout wireframe polygons on top of heatmaps. |
 | `--no-contours`| `flag` | `False` | Disable drawing isopotential contour lines. |
+| `--tech` | `str` | `default` | Technology file name or JSON path (e.g., `default`, `ihp_sg13g2`). |
+| `--guess-layers` | `flag` | `False` | Enable heuristic layer guessing for layers omitted from technology configuration (warns when used). |
 | `--allow-default-pads` | `flag` | `False` | Allow default boundary pad fallback if no power pads or C4 bumps are detected. |
 
 ---

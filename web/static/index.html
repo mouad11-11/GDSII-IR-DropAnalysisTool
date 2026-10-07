@@ -93,6 +93,16 @@
 
         <div class="form-group">
           <div class="form-label">
+            <span>Technology PDK</span>
+          </div>
+          <select id="techSelect" class="form-select" onchange="onTechChanged()">
+            <option value="default" selected>Generic Default (Synthetic)</option>
+            <option value="ihp_sg13g2">IHP SG13G2 (130nm BiCMOS)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <div class="form-label">
             <span>Nominal Supply (V<sub>nom</sub>)</span>
             <span class="val" id="vnomValDisplay">1.00 V</span>
           </div>

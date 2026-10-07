@@ -126,10 +126,18 @@ function onFileLoaded(data) {
   cutlineSlider.min = bb.min_y;
   cutlineSlider.max = bb.max_y;
   cutlineSlider.value = (bb.min_y + bb.height * 0.5).toFixed(1);
-  document.getElementById("cutlineYVal").innerText = `${cutlineSlider.value} µm`;
+  if (data.tech && document.getElementById("techSelect")) {
+    document.getElementById("techSelect").value = data.tech;
+  }
 
   populateLayerTable(data.summary.layers);
   resetZoom();
+}
+
+function onTechChanged() {
+  if (state.fileId) {
+    runAnalysis();
+  }
 }
 
 function populateLayerTable(layers) {
@@ -269,6 +277,7 @@ async function runAnalysis() {
     total_current: parseFloat(document.getElementById("currentInput").value) / 1000.0,
     distribution: document.getElementById("distSelect").value,
     grid_resolution: parseInt(document.getElementById("gridResInput").value),
+    tech: document.getElementById("techSelect") ? document.getElementById("techSelect").value : "default",
     layer_overrides: getLayerOverrides(),
     heatmap_mode: state.heatmapMode,
     show_layout_overlay: document.getElementById("chkOverlay").checked,

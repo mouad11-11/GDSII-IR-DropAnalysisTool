@@ -66,6 +66,8 @@ class AnalysisRequest(BaseModel):
     total_current: float = 0.4
     distribution: str = "uniform"
     grid_resolution: int = 100
+    tech: str = "default"
+    guess_layers: bool = False
     layer_overrides: Optional[Dict[str, Dict[str, Any]]] = None
     heatmap_mode: str = "ir_drop"
     show_layout_overlay: bool = True
@@ -79,6 +81,23 @@ class AnalysisRequest(BaseModel):
 class CutlineRequest(BaseModel):
     file_id: str
     cutline_y_um: Optional[float] = None
+
+
+@app.get("/api/techs")
+def list_techs():
+    """Returns available PDK technology configurations."""
+    return [
+        {
+            "id": "default",
+            "name": "Generic Default (Synthetic)",
+            "description": "Default multi-layer CMOS PDN configuration for synthetic benchmarks",
+        },
+        {
+            "id": "ihp_sg13g2",
+            "name": "IHP SG13G2 (130nm BiCMOS)",
+            "description": "Open-source PDK for IHP SG13G2 (M1-M4, TopMetal1, TopMetal2)",
+        },
+    ]
 
 
 @app.get("/api/samples")
@@ -143,16 +162,20 @@ def load_sample(sample_id: str):
     dst_file = UPLOAD_DIR / f"{file_id}_{src_file.name}"
     shutil.copyfile(src_file, dst_file)
 
-    layout = GDSLayout(str(dst_file))
+    default_tech = "ihp_sg13g2" if sample_id.startswith("ihp_") else "default"
+    layout = GDSLayout(str(dst_file), tech=default_tech)
     SESSION_STORE[file_id] = {
         "gds_path": str(dst_file),
         "layout": layout,
         "filename": src_file.name,
+        "tech": default_tech,
+        "guess_layers": False,
     }
 
     return {
         "file_id": file_id,
         "filename": src_file.name,
+        "tech": default_tech,
         "summary": layout.get_summary(),
     }
 
@@ -169,7 +192,7 @@ async def upload_gds(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, buffer)
 
     try:
-        layout = GDSLayout(str(saved_path))
+        layout = GDSLayout(str(saved_path), tech="default")
     except Exception as e:
         if saved_path.exists():
             saved_path.unlink()
@@ -179,11 +202,14 @@ async def upload_gds(file: UploadFile = File(...)):
         "gds_path": str(saved_path),
         "layout": layout,
         "filename": file.filename,
+        "tech": "default",
+        "guess_layers": False,
     }
 
     return {
         "file_id": file_id,
         "filename": file.filename,
+        "tech": "default",
         "summary": layout.get_summary(),
     }
 
@@ -195,7 +221,13 @@ def run_analysis_endpoint(req: AnalysisRequest):
         raise HTTPException(status_code=404, detail="Session expired or file not found. Please upload again.")
 
     session = SESSION_STORE[req.file_id]
-    layout: GDSLayout = session["layout"]
+    if req.tech != session.get("tech") or req.guess_layers != session.get("guess_layers", False):
+        layout = GDSLayout(session["gds_path"], tech=req.tech, guess_layers=req.guess_layers)
+        session["layout"] = layout
+        session["tech"] = req.tech
+        session["guess_layers"] = req.guess_layers
+    else:
+        layout = session["layout"]
 
     # Convert layer_overrides keys to int
     overrides = {}

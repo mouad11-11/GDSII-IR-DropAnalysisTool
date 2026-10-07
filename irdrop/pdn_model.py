@@ -137,21 +137,36 @@ class PDNBuilder:
             occ_top = occupancies[top_layer]
 
             via_layer = None
-            for vl in via_layers:
-                if bottom_layer < vl < top_layer or vl == bottom_layer + 1:
-                    via_layer = vl
-                    break
+            if self.layout.tech:
+                via_tech = self.layout.tech.get_via_between(bottom_layer, top_layer)
+                if via_tech:
+                    via_layer = via_tech.layer
+
+            if via_layer is None:
+                for vl in via_layers:
+                    v_info = self.layout.get_layer_info(vl)
+                    if v_info and v_info.connects and set(v_info.connects) == {bottom_layer, top_layer}:
+                        via_layer = vl
+                        break
+
+            if via_layer is None and getattr(self.layout, "guess_layers", False):
+                for vl in via_layers:
+                    if bottom_layer < vl < top_layer or vl == bottom_layer + 1:
+                        via_layer = vl
+                        break
 
             if via_layer and via_layer in occupancies:
-                via_occ = occupancies[via_layer]
+                via_counts = self.layout.get_via_counts(via_layer, (self.ny, self.nx))
                 r_via = max(self.layout.layers[via_layer].via_resistance, 1e-3)
                 g_via_unit = 1.0 / r_via
                 for r in range(self.ny):
                     for c in range(self.nx):
-                        if via_occ[r, c] > 0.01 and occ_bottom[r, c] > 0.01 and occ_top[r, c] > 0.01:
+                        num_vias = via_counts[r, c]
+                        v_eff = num_vias if num_vias > 0 else occupancies[via_layer][r, c]
+                        if v_eff > 0.01 and occ_bottom[r, c] > 0.01 and occ_top[r, c] > 0.01:
                             idx1 = get_node_idx(m_idx, r, c)
                             idx2 = get_node_idx(m_idx + 1, r, c)
-                            add_resistor(idx1, idx2, g_via_unit * via_occ[r, c])
+                            add_resistor(idx1, idx2, g_via_unit * v_eff)
             else:
                 r_via_default = 1.5
                 g_via_unit = 1.0 / r_via_default
@@ -163,7 +178,7 @@ class PDNBuilder:
                             idx2 = get_node_idx(m_idx + 1, r, c)
                             add_resistor(idx1, idx2, g_via_unit * overlap)
 
-        warnings: List[str] = []
+        warnings: List[str] = list(self.layout.warnings)
 
         # Power pad boundary nodes
         pad_nodes_set: Set[int] = set()
@@ -178,15 +193,17 @@ class PDNBuilder:
                         pad_nodes_set.add(idx)
 
         min_x, min_y, max_x, max_y = self.layout.bbox
-        for lbl in self.layout.labels:
-            if any(k in lbl["text"].upper() for k in ["VDD", "PAD", "C4", "PWR"]):
-                c = int(np.clip((lbl["x"] - min_x) / self.dx, 0, self.nx - 1))
-                r = int(np.clip((lbl["y"] - min_y) / self.dy, 0, self.ny - 1))
-                for dr in range(-1, 2):
-                    for dc in range(-1, 2):
-                        nr, nc = r + dr, c + dc
-                        if 0 <= nr < self.ny and 0 <= nc < self.nx:
-                            pad_nodes_set.add(get_node_idx(top_metal_idx, nr, nc))
+        for lbl in self.layout.pad_labels:
+            c = int(np.clip((lbl["x"] - min_x) / self.dx, 0, self.nx - 1))
+            r = int(np.clip((lbl["y"] - min_y) / self.dy, 0, self.ny - 1))
+            lbl_metal_idx = top_metal_idx
+            if lbl.get("layer") in metal_layers:
+                lbl_metal_idx = metal_layers.index(lbl["layer"])
+            for dr in range(-1, 2):
+                for dc in range(-1, 2):
+                    nr, nc = r + dr, c + dc
+                    if 0 <= nr < self.ny and 0 <= nc < self.nx:
+                        pad_nodes_set.add(get_node_idx(lbl_metal_idx, nr, nc))
 
         if not pad_nodes_set:
             if not self.allow_default_pads:

@@ -28,6 +28,17 @@ def main():
     parser.add_argument("--no-overlay", action="store_true", help="Do not overlay layout wires on heatmaps")
     parser.add_argument("--no-contours", action="store_true", help="Do not draw isopotential contour lines")
     parser.add_argument(
+        "--tech",
+        type=str,
+        default="default",
+        help="Technology file name or path (e.g. 'default', 'ihp_sg13g2', or path to JSON)",
+    )
+    parser.add_argument(
+        "--guess-layers",
+        action="store_true",
+        help="Enable heuristic guessing for layers not defined in the technology configuration (warns when triggered)",
+    )
+    parser.add_argument(
         "--allow-default-pads",
         action="store_true",
         help="Allow default peripheral pad placement if no pads or C4 bumps are detected",
@@ -45,7 +56,7 @@ def main():
         limit_mv = (args.limit_pct / 100.0) * args.vnom * 1000.0
 
     print(f"[INFO] Reading layout: {gds_path.name}")
-    print(f"[INFO] Config: Vnom={args.vnom:.3f}V, Limit={limit_mv:.1f}mV, Itotal={args.current * 1000:.1f}mA, Dist={args.dist}, Grid={args.res}x{args.res}")
+    print(f"[INFO] Config: Tech={args.tech}, Vnom={args.vnom:.3f}V, Limit={limit_mv:.1f}mV, Itotal={args.current * 1000:.1f}mA, Dist={args.dist}, Grid={args.res}x{args.res}")
 
     try:
         layout, result, analysis, visualizer = run_analysis(
@@ -56,6 +67,8 @@ def main():
             distribution=args.dist,
             grid_resolution=(args.res, args.res),
             allow_default_pads=args.allow_default_pads,
+            tech=args.tech,
+            guess_layers=args.guess_layers,
         )
     except Exception as e:
         print(f"Error during analysis: {e}", file=sys.stderr)
