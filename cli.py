@@ -49,6 +49,13 @@ def main():
         action="store_true",
         help="Allow default peripheral pad placement if no pads or C4 bumps are detected",
     )
+    parser.add_argument(
+        "--solver",
+        type=str,
+        default="auto",
+        choices=["auto", "cg", "amg", "direct"],
+        help="Linear solver method ('auto', 'cg', 'amg', 'direct', default: 'auto')",
+    )
 
     args = parser.parse_args()
 
@@ -62,7 +69,7 @@ def main():
         limit_mv = (args.limit_pct / 100.0) * args.vnom * 1000.0
 
     print(f"[INFO] Reading layout: {gds_path.name}")
-    print(f"[INFO] Config: Tech={args.tech}, Net={args.net}, Vnom={args.vnom:.3f}V, Limit={limit_mv:.1f}mV, Itotal={args.current * 1000:.1f}mA, Dist={args.dist}, Grid={args.res}x{args.res}")
+    print(f"[INFO] Config: Tech={args.tech}, Net={args.net}, Vnom={args.vnom:.3f}V, Limit={limit_mv:.1f}mV, Itotal={args.current * 1000:.1f}mA, Dist={args.dist}, Grid={args.res}x{args.res}, Solver={args.solver}")
 
     try:
         layout, result, analysis, visualizer = run_analysis(
@@ -76,6 +83,7 @@ def main():
             tech=args.tech,
             guess_layers=args.guess_layers,
             target_net=args.net,
+            solver_method=args.solver,
         )
     except Exception as e:
         print(f"Error during analysis: {e}", file=sys.stderr)

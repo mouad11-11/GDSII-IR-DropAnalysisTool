@@ -8,6 +8,13 @@ import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 from scipy.ndimage import gaussian_filter
 
+try:
+    import pyamg
+    HAS_PYAMG = True
+except ImportError:
+    pyamg = None
+    HAS_PYAMG = False
+
 from irdrop.pdn_model import PDNNetwork
 
 
@@ -43,6 +50,9 @@ class IRDropSolver:
         total_current: float = 0.5,  # Amperes
         distribution: str = "uniform",  # 'uniform', 'center_hotspot', 'dual_hotspot', 'quad_hotspot'
         hotspot_boxes: Optional[List[Dict[str, float]]] = None,
+        solver_method: str = "auto",  # 'auto', 'cg', 'amg', 'direct'
+        tolerance: float = 1e-10,
+        max_iter: int = 500,
     ) -> SolverResult:
         t0 = time.time()
         net = self.network
@@ -51,6 +61,7 @@ class IRDropSolver:
 
         x_coords = np.linspace(min_x, max_x, nx)
         y_coords = np.linspace(min_y, max_y, ny)
+        nodes_per_layer = ny * nx
 
         # Connected components to isolate floating metal
         n_components, comp_labels = sp.csgraph.connected_components(net.G, directed=False)
@@ -61,77 +72,134 @@ class IRDropSolver:
         if not valid_sink_indices:
             valid_sink_indices = list(net.pad_node_indices)
 
-        sink_weights = np.zeros(len(valid_sink_indices), dtype=np.float64)
-        nodes_per_layer = ny * nx
+        s_arr = np.array(valid_sink_indices, dtype=np.int64)
+        rem = s_arr % nodes_per_layer
+        r_arr = rem // nx
+        c_arr = rem % nx
+        x_arr = x_coords[c_arr]
+        y_arr = y_coords[r_arr]
+        weights = np.ones(len(s_arr), dtype=np.float64)
 
-        for i, s_idx in enumerate(valid_sink_indices):
-            rem = s_idx % nodes_per_layer
-            r = rem // nx
-            c = rem % nx
-            x = x_coords[c]
-            y = y_coords[r]
-            weight = 1.0
-            m0_layer = net.metal_layers[0]
-            if m0_layer in net.layer_occupancy:
-                m0_occ = net.layer_occupancy[m0_layer][r, c]
-                weight *= max(float(m0_occ), 0.01)
+        m0_layer = net.metal_layers[0]
+        if m0_layer in net.layer_occupancy:
+            m0_occ = net.layer_occupancy[m0_layer][r_arr, c_arr]
+            weights *= np.maximum(m0_occ.astype(np.float64), 0.01)
 
-            norm_x = (x - min_x) / (max_x - min_x + 1e-9)
-            norm_y = (y - min_y) / (max_y - min_y + 1e-9)
+        norm_x = (x_arr - min_x) / (max_x - min_x + 1e-9)
+        norm_y = (y_arr - min_y) / (max_y - min_y + 1e-9)
 
-            if distribution == "center_hotspot":
-                dist_center_sq = (norm_x - 0.5) ** 2 + (norm_y - 0.5) ** 2
-                weight = 1.0 + 4.0 * np.exp(-dist_center_sq / 0.05)
-            elif distribution == "dual_hotspot":
-                d1 = (norm_x - 0.3) ** 2 + (norm_y - 0.5) ** 2
-                d2 = (norm_x - 0.7) ** 2 + (norm_y - 0.5) ** 2
-                weight = 1.0 + 5.0 * np.exp(-d1 / 0.04) + 5.0 * np.exp(-d2 / 0.04)
-            elif distribution == "quad_hotspot":
-                d1 = (norm_x - 0.3) ** 2 + (norm_y - 0.3) ** 2
-                d2 = (norm_x - 0.7) ** 2 + (norm_y - 0.3) ** 2
-                d3 = (norm_x - 0.3) ** 2 + (norm_y - 0.7) ** 2
-                d4 = (norm_x - 0.7) ** 2 + (norm_y - 0.7) ** 2
-                weight = 1.0 + 4.0 * (np.exp(-d1 / 0.03) + np.exp(-d2 / 0.03) + np.exp(-d3 / 0.03) + np.exp(-d4 / 0.03))
+        if distribution == "center_hotspot":
+            dist_center_sq = (norm_x - 0.5) ** 2 + (norm_y - 0.5) ** 2
+            weights *= (1.0 + 4.0 * np.exp(-dist_center_sq / 0.05))
+        elif distribution == "dual_hotspot":
+            d1 = (norm_x - 0.3) ** 2 + (norm_y - 0.5) ** 2
+            d2 = (norm_x - 0.7) ** 2 + (norm_y - 0.5) ** 2
+            weights *= (1.0 + 5.0 * np.exp(-d1 / 0.04) + 5.0 * np.exp(-d2 / 0.04))
+        elif distribution == "quad_hotspot":
+            d1 = (norm_x - 0.3) ** 2 + (norm_y - 0.3) ** 2
+            d2 = (norm_x - 0.7) ** 2 + (norm_y - 0.3) ** 2
+            d3 = (norm_x - 0.3) ** 2 + (norm_y - 0.7) ** 2
+            d4 = (norm_x - 0.7) ** 2 + (norm_y - 0.7) ** 2
+            weights *= (1.0 + 4.0 * (np.exp(-d1 / 0.03) + np.exp(-d2 / 0.03) + np.exp(-d3 / 0.03) + np.exp(-d4 / 0.03)))
 
-            if hotspot_boxes:
-                for box in hotspot_boxes:
-                    if (box.get("x_min", 0) <= x <= box.get("x_max", 0)) and (box.get("y_min", 0) <= y <= box.get("y_max", 0)):
-                        weight *= float(box.get("multiplier", 2.0))
+        if hotspot_boxes:
+            for box in hotspot_boxes:
+                in_box = (
+                    (x_arr >= box.get("x_min", 0)) & (x_arr <= box.get("x_max", 0)) &
+                    (y_arr >= box.get("y_min", 0)) & (y_arr <= box.get("y_max", 0))
+                )
+                weights[in_box] *= float(box.get("multiplier", 2.0))
 
-            sink_weights[i] = weight
-
-        total_weight = np.sum(sink_weights)
+        total_weight = float(np.sum(weights))
         if total_weight > 0:
-            current_per_sink = (total_current / total_weight) * sink_weights
+            current_per_sink = (total_current / total_weight) * weights
         else:
-            current_per_sink = np.full(len(valid_sink_indices), total_current / max(len(valid_sink_indices), 1))
+            current_per_sink = np.full(len(s_arr), total_current / max(len(s_arr), 1))
 
-        # Setup RHS vector
-        rhs = np.zeros(net.total_nodes, dtype=np.float64)
-        for i, s_idx in enumerate(valid_sink_indices):
-            rhs[s_idx] = -current_per_sink[i]
+        # Setup RHS vector of current injections
+        i_inj = np.zeros(net.total_nodes, dtype=np.float64)
+        i_inj[s_arr] = -current_per_sink
 
-        # Dirichlet boundary conditions on pad nodes
-        A = net.G.tolil()
-        pad_set = set(net.pad_node_indices)
+        pad_indices = np.array(list(set(net.pad_node_indices)), dtype=np.int64)
+        is_pad = np.zeros(net.total_nodes, dtype=bool)
+        is_pad[pad_indices] = True
 
-        for p in pad_set:
-            A.rows[p] = [p]
-            A.data[p] = [1.0]
-            rhs[p] = v_nom
-
-        unconnected_nodes = np.where(~connected_to_pads)[0]
-        for u in unconnected_nodes:
-            A.rows[u] = [u]
-            A.data[u] = [1.0]
-            rhs[u] = v_nom
-
-        A_csr = A.tocsr()
+        # Unknown nodes: connected to pads, but NOT pad nodes themselves
+        unknown_mask = connected_to_pads & (~is_pad)
+        unknown_indices = np.where(unknown_mask)[0]
 
         warnings = list(self.network.warnings)
+        converged = True
 
-        # Solve sparse linear system
-        V = spla.spsolve(A_csr, rhs)
+        if len(unknown_indices) == 0:
+            V = np.full(net.total_nodes, v_nom, dtype=np.float64)
+        else:
+            # Dirichlet elimination into RHS to maintain symmetric positive definite (SPD) system:
+            # G_UU * V_U = I_U - G_UD * (v_nom * 1_D)
+            G_csr = net.G.tocsr()
+            A_UU = G_csr[unknown_indices, :][:, unknown_indices]
+            
+            # Off-diagonal Dirichlet coupling
+            if len(pad_indices) > 0:
+                G_UD = G_csr[unknown_indices, :][:, pad_indices]
+                dirichlet_coupling = np.squeeze(np.asarray(G_UD.sum(axis=1)))
+                b_U = i_inj[unknown_indices] - (v_nom * dirichlet_coupling)
+            else:
+                b_U = i_inj[unknown_indices]
+
+            n_unknowns = len(unknown_indices)
+
+            # Determine solver strategy
+            use_direct = False
+            if solver_method == "direct":
+                use_direct = True
+            elif solver_method == "auto":
+                if n_unknowns < 5000 or not HAS_PYAMG:
+                    use_direct = True
+                else:
+                    use_direct = False
+            elif solver_method in ("cg", "amg"):
+                use_direct = False
+
+            if use_direct:
+                V_U = spla.spsolve(A_UU.tocsc(), b_U)
+            else:
+                # Solve via Preconditioned Conjugate Gradient (PCG)
+                M = None
+                if HAS_PYAMG:
+                    try:
+                        ml = pyamg.ruge_stuben_solver(A_UU)
+                        M = ml.aspreconditioner(cycle='V')
+                    except Exception:
+                        try:
+                            ml = pyamg.smoothed_aggregation_solver(A_UU)
+                            M = ml.aspreconditioner(cycle='V')
+                        except Exception:
+                            M = None
+
+                if M is None:
+                    # Jacobi diagonal preconditioner
+                    diag = A_UU.diagonal()
+                    diag_inv = np.where(diag > 0, 1.0 / diag, 1.0)
+                    M = sp.diags(diag_inv, format='csr')
+
+                V_U, info = spla.cg(A_UU, b_U, M=M, rtol=tolerance, atol=1e-12, maxiter=max_iter)
+                if info != 0:
+                    V_U = spla.spsolve(A_UU.tocsc(), b_U)
+                    warnings.append(f"Warning: Iterative solver did not reach tolerance (code={info}); used direct fallback.")
+
+            # Residual check
+            res_val = float(np.linalg.norm(A_UU.dot(V_U) - b_U))
+            b_norm = float(np.linalg.norm(b_U))
+            rel_res = res_val / max(b_norm, 1e-12)
+            if rel_res > 1e-3:
+                warnings.append(f"Blocking: Solver relative residual {rel_res:.2e} exceeded convergence tolerance.")
+                converged = False
+
+            # Reconstruct full potentials vector
+            V = np.full(net.total_nodes, v_nom, dtype=np.float64)
+            V[unknown_indices] = V_U
+
         solve_time = time.time() - t0
 
         # Check residual and NaNs
@@ -139,15 +207,6 @@ class IRDropSolver:
         if has_nan:
             warnings.append("Blocking: Solver produced NaN or Inf potential values.")
             converged = False
-        else:
-            residual = float(np.linalg.norm(A_csr.dot(V) - rhs))
-            rhs_norm = float(np.linalg.norm(rhs))
-            rel_residual = residual / max(rhs_norm, 1e-12)
-            if rel_residual > 1e-3:
-                warnings.append(f"Blocking: Solver relative residual {rel_residual:.2e} exceeded convergence tolerance.")
-                converged = False
-            else:
-                converged = True
 
         # 5. Extract layer grids
         layer_voltages: Dict[int, np.ndarray] = {}

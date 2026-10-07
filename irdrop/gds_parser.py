@@ -104,12 +104,12 @@ class GDSLayout:
         flat_cell.flatten()
         
         # Collect polygons from polygons and paths with (layer, datatype)
-        all_raw_polys: List[Tuple[int, int, np.ndarray]] = []
+        all_raw_polys: List[Tuple[int, int, gdstk.Polygon]] = []
         for poly in flat_cell.polygons:
-            all_raw_polys.append((poly.layer, poly.datatype, poly.points))
+            all_raw_polys.append((poly.layer, poly.datatype, poly))
         for path in flat_cell.paths:
             for poly in path.to_polygons():
-                all_raw_polys.append((poly.layer, poly.datatype, poly.points))
+                all_raw_polys.append((poly.layer, poly.datatype, poly))
 
         scale_to_um = float(self.unit / 1e-6)
 
@@ -129,7 +129,7 @@ class GDSLayout:
         key_stats: Dict[Tuple[int, int], Dict[str, Any]] = {}
         layer_stats: Dict[int, Dict[str, Any]] = {}
 
-        for layer, datatype, raw_points in all_raw_polys:
+        for layer, datatype, poly in all_raw_polys:
             # Skip pin, label, and filler datatypes per protocol:
             # Check tech configuration role or standard EDA pin/label datatypes (2, 25)
             if self.tech:
@@ -139,7 +139,7 @@ class GDSLayout:
             if datatype in (2, 25):
                 continue
 
-            points = raw_points.astype(np.float64) * scale_to_um  # (N, 2) in um
+            points = poly.points.astype(np.float64) * scale_to_um  # (N, 2) in um
             key = (layer, datatype)
 
             if key not in self.polygons_by_key:
@@ -166,12 +166,17 @@ class GDSLayout:
                 }
             self.polygons_by_layer[layer].append(points)
 
-            # Area computation (shoelace formula)
-            x, y = points[:, 0], points[:, 1]
-            area = float(0.5 * np.abs(np.dot(x, np.roll(y, 1)) - np.dot(y, np.roll(x, 1))))
-            
-            p_min_x, p_min_y = float(np.min(x)), float(np.min(y))
-            p_max_x, p_max_y = float(np.max(x)), float(np.max(y))
+            # Area computation via gdstk's poly.area()
+            area = float(abs(poly.area()) * (scale_to_um ** 2))
+            bb = poly.bounding_box()
+            if bb is not None:
+                p_min_x = float(bb[0][0]) * scale_to_um
+                p_min_y = float(bb[0][1]) * scale_to_um
+                p_max_x = float(bb[1][0]) * scale_to_um
+                p_max_y = float(bb[1][1]) * scale_to_um
+            else:
+                p_min_x, p_min_y = float(np.min(points[:, 0])), float(np.min(points[:, 1]))
+                p_max_x, p_max_y = float(np.max(points[:, 0])), float(np.max(points[:, 1]))
 
             for stats in (key_stats[key], layer_stats[layer]):
                 stats["area"] += area

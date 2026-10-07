@@ -78,6 +78,7 @@ class AnalysisRequest(BaseModel):
     show_worst_marker: bool = True
     cmap_name: str = "turbo"
     allow_default_pads: bool = False
+    solver_method: str = "auto"
 
 
 class CutlineRequest(BaseModel):
@@ -256,6 +257,7 @@ def run_analysis_endpoint(req: AnalysisRequest):
         v_nom=req.v_nom,
         total_current=req.total_current,
         distribution=req.distribution,
+        solver_method=req.solver_method,
     )
 
     analyzer = IRDropAnalyzer(solver_result, delta_v_limit_mv=req.limit_mv)

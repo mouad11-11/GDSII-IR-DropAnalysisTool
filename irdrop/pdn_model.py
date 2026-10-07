@@ -102,19 +102,30 @@ class PDNBuilder:
         def get_node_idx(metal_idx: int, r: int, c: int) -> int:
             return metal_idx * nodes_per_layer + r * self.nx + c
 
-        row_indices = []
-        col_indices = []
-        conductance_vals = []
+        row_parts: List[np.ndarray] = []
+        col_parts: List[np.ndarray] = []
+        val_parts: List[np.ndarray] = []
         node_has_connection = np.zeros(total_nodes, dtype=bool)
 
-        def add_resistor(idx1: int, idx2: int, g: float):
-            if g <= 0.0 or idx1 == idx2:
+        def add_resistors_vec(idx1, idx2, g):
+            idx1 = np.atleast_1d(idx1)
+            idx2 = np.atleast_1d(idx2)
+            g = np.atleast_1d(g)
+            valid = (g > 0.0) & (idx1 != idx2)
+            if not np.any(valid):
                 return
-            row_indices.extend([idx1, idx2, idx1, idx2])
-            col_indices.extend([idx1, idx2, idx2, idx1])
-            conductance_vals.extend([g, g, -g, -g])
-            node_has_connection[idx1] = True
-            node_has_connection[idx2] = True
+            i1 = idx1[valid]
+            i2 = idx2[valid]
+            gv = g[valid]
+            row_parts.extend([i1, i2, i1, i2])
+            col_parts.extend([i1, i2, i2, i1])
+            val_parts.extend([gv, gv, -gv, -gv])
+            node_has_connection[i1] = True
+            node_has_connection[i2] = True
+
+        r_grid_x, c_grid_x = np.indices((self.ny, self.nx - 1))
+        r_grid_y, c_grid_y = np.indices((self.ny - 1, self.nx))
+        r_all, c_all = np.indices((self.ny, self.nx))
 
         # Intra-layer metal conductances derived from wire width:
         # Effective edge conductance G = (dy / dx / Rsheet) * occ_eff
@@ -125,23 +136,29 @@ class PDNBuilder:
             g_factor_x = (1.0 / r_sq) * (self.dy / self.dx)
             g_factor_y = (1.0 / r_sq) * (self.dx / self.dy)
 
-            for r in range(self.ny):
-                for c in range(self.nx - 1):
-                    o1, o2 = occ[r, c], occ[r, c + 1]
-                    if o1 > 1e-4 and o2 > 1e-4:
-                        c_eff = (2.0 * o1 * o2) / (o1 + o2)
-                        idx1 = get_node_idx(m_idx, r, c)
-                        idx2 = get_node_idx(m_idx, r, c + 1)
-                        add_resistor(idx1, idx2, g_factor_x * c_eff)
+            # Horizontal edges
+            o1_x = occ[:, :-1]
+            o2_x = occ[:, 1:]
+            mask_x = (o1_x > 1e-4) & (o2_x > 1e-4)
+            if np.any(mask_x):
+                r_x = r_grid_x[mask_x]
+                c_x = c_grid_x[mask_x]
+                c_eff_x = (2.0 * o1_x[mask_x] * o2_x[mask_x]) / (o1_x[mask_x] + o2_x[mask_x])
+                idx1 = m_idx * nodes_per_layer + r_x * self.nx + c_x
+                idx2 = m_idx * nodes_per_layer + r_x * self.nx + (c_x + 1)
+                add_resistors_vec(idx1, idx2, g_factor_x * c_eff_x)
 
-            for r in range(self.ny - 1):
-                for c in range(self.nx):
-                    o1, o2 = occ[r, c], occ[r + 1, c]
-                    if o1 > 1e-4 and o2 > 1e-4:
-                        c_eff = (2.0 * o1 * o2) / (o1 + o2)
-                        idx1 = get_node_idx(m_idx, r, c)
-                        idx2 = get_node_idx(m_idx, r + 1, c)
-                        add_resistor(idx1, idx2, g_factor_y * c_eff)
+            # Vertical edges
+            o1_y = occ[:-1, :]
+            o2_y = occ[1:, :]
+            mask_y = (o1_y > 1e-4) & (o2_y > 1e-4)
+            if np.any(mask_y):
+                r_y = r_grid_y[mask_y]
+                c_y = c_grid_y[mask_y]
+                c_eff_y = (2.0 * o1_y[mask_y] * o2_y[mask_y]) / (o1_y[mask_y] + o2_y[mask_y])
+                idx1 = m_idx * nodes_per_layer + r_y * self.nx + c_y
+                idx2 = m_idx * nodes_per_layer + (r_y + 1) * self.nx + c_y
+                add_resistors_vec(idx1, idx2, g_factor_y * c_eff_y)
 
         # Inter-layer via conductances
         for m_idx in range(num_metals - 1):
@@ -173,24 +190,25 @@ class PDNBuilder:
                 via_counts = self.layout.get_via_counts(via_layer, (self.ny, self.nx))
                 r_via = max(self.layout.layers[via_layer].via_resistance, 1e-3)
                 g_via_unit = 1.0 / r_via
-                for r in range(self.ny):
-                    for c in range(self.nx):
-                        num_vias = via_counts[r, c]
-                        v_eff = num_vias if num_vias > 0 else occupancies[via_layer][r, c]
-                        if v_eff > 0.01 and occ_bottom[r, c] > 0.01 and occ_top[r, c] > 0.01:
-                            idx1 = get_node_idx(m_idx, r, c)
-                            idx2 = get_node_idx(m_idx + 1, r, c)
-                            add_resistor(idx1, idx2, g_via_unit * v_eff)
+                v_eff_mat = np.where(via_counts > 0, via_counts, occupancies[via_layer])
+                mask_v = (v_eff_mat > 0.01) & (occ_bottom > 0.01) & (occ_top > 0.01)
+                if np.any(mask_v):
+                    r_v = r_all[mask_v]
+                    c_v = c_all[mask_v]
+                    idx1 = m_idx * nodes_per_layer + r_v * self.nx + c_v
+                    idx2 = (m_idx + 1) * nodes_per_layer + r_v * self.nx + c_v
+                    add_resistors_vec(idx1, idx2, g_via_unit * v_eff_mat[mask_v])
             else:
                 r_via_default = 1.5
                 g_via_unit = 1.0 / r_via_default
-                for r in range(self.ny):
-                    for c in range(self.nx):
-                        overlap = occ_bottom[r, c] * occ_top[r, c]
-                        if overlap > 0.05:
-                            idx1 = get_node_idx(m_idx, r, c)
-                            idx2 = get_node_idx(m_idx + 1, r, c)
-                            add_resistor(idx1, idx2, g_via_unit * overlap)
+                overlap = occ_bottom * occ_top
+                mask_o = overlap > 0.05
+                if np.any(mask_o):
+                    r_o = r_all[mask_o]
+                    c_o = c_all[mask_o]
+                    idx1 = m_idx * nodes_per_layer + r_o * self.nx + c_o
+                    idx2 = (m_idx + 1) * nodes_per_layer + r_o * self.nx + c_o
+                    add_resistors_vec(idx1, idx2, g_via_unit * overlap[mask_o])
 
         warnings: List[str] = list(self.layout.warnings)
 
@@ -200,11 +218,12 @@ class PDNBuilder:
 
         for pl in pad_layers:
             pad_occ = occupancies[pl]
-            for r in range(self.ny):
-                for c in range(self.nx):
-                    if pad_occ[r, c] > 0.1:
-                        idx = get_node_idx(top_metal_idx, r, c)
-                        pad_nodes_set.add(idx)
+            mask_pad = pad_occ > 0.1
+            if np.any(mask_pad):
+                r_p = r_all[mask_pad]
+                c_p = c_all[mask_pad]
+                pad_indices = top_metal_idx * nodes_per_layer + r_p * self.nx + c_p
+                pad_nodes_set.update(pad_indices.tolist())
 
         min_x, min_y, max_x, max_y = self.layout.bbox
         net_pattern = re.compile(rf'(?:^|[^A-Za-z0-9]){re.escape(self.target_net)}(?:$|[^A-Za-z0-9])', re.IGNORECASE)
@@ -243,29 +262,20 @@ class PDNBuilder:
         if len(metal_layers) == 0:
             raise ValueError("No valid current sinks found on active metal rails.")
         m0_occ = occupancies[metal_layers[0]]
-        sink_nodes = []
-        for r in range(self.ny):
-            for c in range(self.nx):
-                idx = get_node_idx(0, r, c)
-                if m0_occ[r, c] > 0.01 and node_has_connection[idx]:
-                    sink_nodes.append(idx)
+        sink_mask = (m0_occ.ravel() > 0.01) & node_has_connection[:nodes_per_layer]
+        sink_nodes = np.where(sink_mask)[0].tolist()
 
         if not sink_nodes:
             raise ValueError("No valid current sinks found on active metal rails.")
 
         # Assemble CSR matrix
-        if not row_indices:
-            # Degenerate case fallback
-            row_indices = [0]
-            col_indices = [0]
-            conductance_vals = [1.0]
-
-        G_coo = sp.coo_matrix(
-            (conductance_vals, (row_indices, col_indices)),
-            shape=(total_nodes, total_nodes),
-            dtype=np.float64,
-        )
-        G = G_coo.tocsr()
+        if row_parts:
+            rows = np.concatenate(row_parts)
+            cols = np.concatenate(col_parts)
+            vals = np.concatenate(val_parts)
+            G = sp.csc_matrix((vals, (rows, cols)), shape=(total_nodes, total_nodes), dtype=np.float64).tocsr()
+        else:
+            G = sp.csr_matrix((total_nodes, total_nodes), dtype=np.float64)
 
         # Check electrical connectivity of sinks to pads
         n_components, comp_labels = sp.csgraph.connected_components(G, directed=False)
