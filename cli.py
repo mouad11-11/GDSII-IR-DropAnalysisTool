@@ -9,7 +9,7 @@ from irdrop import run_analysis
 
 def main():
     parser = argparse.ArgumentParser(
-        description="GDSII IR-drop analysis and margin signoff verification tool."
+        description="GDSII IR-drop analysis and margin signoff verification tool (exits 0 on PASS, 2 on VIOLATION, 1 on error)."
     )
     parser.add_argument("gds_file", type=str, help="Path to input GDSII layout file (.gds / .gds2)")
     parser.add_argument("--vnom", type=float, default=1.0, help="Nominal supply voltage V_nom in Volts (default: 1.0)")
@@ -42,14 +42,18 @@ def main():
     print(f"[INFO] Reading layout: {gds_path.name}")
     print(f"[INFO] Config: Vnom={args.vnom:.3f}V, Limit={limit_mv:.1f}mV, Itotal={args.current * 1000:.1f}mA, Dist={args.dist}, Grid={args.res}x{args.res}")
 
-    layout, result, analysis, visualizer = run_analysis(
-        str(gds_path),
-        v_nom=args.vnom,
-        delta_v_limit_mv=limit_mv,
-        total_current=args.current,
-        distribution=args.dist,
-        grid_resolution=(args.res, args.res),
-    )
+    try:
+        layout, result, analysis, visualizer = run_analysis(
+            str(gds_path),
+            v_nom=args.vnom,
+            delta_v_limit_mv=limit_mv,
+            total_current=args.current,
+            distribution=args.dist,
+            grid_resolution=(args.res, args.res),
+        )
+    except Exception as e:
+        print(f"Error during analysis: {e}", file=sys.stderr)
+        sys.exit(1)
 
     print(f"[INFO] Solve finished in {result.solve_time_seconds:.3f}s")
     print(f"[INFO] Signoff status: {analysis.status}")
@@ -57,7 +61,10 @@ def main():
     print(f"  Max IR drop:          {analysis.delta_v_max_mv:.2f} mV")
     print(f"  Min observed voltage: {analysis.min_observed_voltage_v:.4f} V (Limit: {analysis.min_allowed_voltage_v:.4f} V)")
     print(f"  Avg IR drop:          {analysis.delta_v_avg_mv:.2f} mV (std={analysis.delta_v_std_mv:.2f} mV)")
-    print(f"  Safe current budget:  {analysis.max_safe_current_ma:.1f} mA (Headroom: {analysis.current_headroom_ma:+.1f} mA)")
+    if analysis.max_safe_current_ma is not None:
+        print(f"  Safe current budget:  {analysis.max_safe_current_ma:.1f} mA (Headroom: {analysis.current_headroom_ma:+.1f} mA)")
+    else:
+        print("  Safe current budget:  N/A (zero IR-drop)")
     print(f"  Effective resistance: {analysis.effective_pdn_resistance_ohm:.4f} Ohm (Peak: {analysis.peak_pdn_resistance_ohm:.4f} Ohm)")
     print(f"  Worst node:           ({analysis.worst_node['x_um']:.1f}, {analysis.worst_node['y_um']:.1f}) um on Layer {analysis.worst_node['layer']}")
     print(f"  Violating area:       {analysis.violating_area_percentage:.2f}% ({analysis.violating_area_um2:.1f} um^2)")
@@ -130,12 +137,19 @@ def main():
         ],
         "layer_metrics": analysis.layer_metrics,
     }
-    report_json = out_dir / f"{gds_path.stem}_signoff_report.json"
+    report_json = out_dir / f"{gds_path.stem}_report.json"
     with open(report_json, "w") as f:
+        json.dump(report_data, f, indent=2)
+    with open(out_dir / f"{gds_path.stem}_signoff_report.json", "w") as f:
         json.dump(report_data, f, indent=2)
 
     print(f"[INFO] Wrote report and figures to: {out_dir}")
 
+    if analysis.status == "VIOLATION":
+        sys.exit(2)
+    sys.exit(0)
+
 
 if __name__ == "__main__":
     main()
+

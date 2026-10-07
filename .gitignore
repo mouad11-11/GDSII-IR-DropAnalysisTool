@@ -11,8 +11,8 @@ htmlcov/
 # User uploads & session cache
 uploads/
 scratch/
-report_test/
-report_counter/
+report/
+report*/
 
 # Operating System files
 .DS_Store
