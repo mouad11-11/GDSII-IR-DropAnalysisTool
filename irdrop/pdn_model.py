@@ -1,5 +1,6 @@
 """PDN resistive mesh model and conductance matrix builder."""
 
+import copy
 from dataclasses import dataclass, field
 import re
 from typing import Any, Dict, List, Optional, Tuple, Set
@@ -55,10 +56,15 @@ class PDNBuilder:
         self.target_net = target_net
         self.net_layers = net_layers
         
-        # Apply layer overrides
+        # Copy layer metadata per analysis to prevent mutating cached layout
+        self.layers: Dict[int, LayerInfo] = {
+            layer_id: copy.copy(info) for layer_id, info in self.layout.layers.items()
+        }
+
+        # Apply layer overrides to this analysis instance
         for layer, props in self.layer_overrides.items():
-            if layer in self.layout.layers:
-                info = self.layout.layers[layer]
+            if layer in self.layers:
+                info = self.layers[layer]
                 if "role" in props:
                     info.role = props["role"]
                 if "sheet_res" in props:
@@ -75,9 +81,9 @@ class PDNBuilder:
     def build_network(self) -> PDNNetwork:
         """Constructs the sparse conductance matrix G for the multi-tier PDN."""
         # Identify active layers
-        metal_layers = [l for l, info in sorted(self.layout.layers.items()) if info.role == "metal"]
-        via_layers = [l for l, info in sorted(self.layout.layers.items()) if info.role == "via"]
-        pad_layers = [l for l, info in sorted(self.layout.layers.items()) if info.role == "pad"]
+        metal_layers = [l for l, info in sorted(self.layers.items()) if info.role == "metal"]
+        via_layers = [l for l, info in sorted(self.layers.items()) if info.role == "via"]
+        pad_layers = [l for l, info in sorted(self.layers.items()) if info.role == "pad"]
 
         if self.net_layers:
             metal_layers = [l for l in metal_layers if l in self.net_layers]
@@ -85,7 +91,7 @@ class PDNBuilder:
 
         # Fallback if no metal layers are classified
         if not metal_layers:
-            candidates = [l for l, info in sorted(self.layout.layers.items()) if info.role not in ("pad", "boundary") and l < 60]
+            candidates = [l for l, info in sorted(self.layers.items()) if info.role not in ("pad", "boundary") and l < 60]
             if not candidates:
                 raise ValueError("No valid current sinks found on active metal rails.")
             metal_layers = candidates
@@ -131,7 +137,7 @@ class PDNBuilder:
         # Effective edge conductance G = (dy / dx / Rsheet) * occ_eff
         for m_idx, layer in enumerate(metal_layers):
             occ = occupancies[layer]
-            r_sq = max(self.layout.layers[layer].sheet_resistance, 1e-4)
+            r_sq = max(self.layers[layer].sheet_resistance, 1e-4)
 
             g_factor_x = (1.0 / r_sq) * (self.dy / self.dx)
             g_factor_y = (1.0 / r_sq) * (self.dx / self.dy)
@@ -175,7 +181,7 @@ class PDNBuilder:
 
             if via_layer is None:
                 for vl in via_layers:
-                    v_info = self.layout.get_layer_info(vl)
+                    v_info = self.layers.get(vl, self.layout.get_layer_info(vl))
                     if v_info and v_info.connects and set(v_info.connects) == {bottom_layer, top_layer}:
                         via_layer = vl
                         break
@@ -188,7 +194,7 @@ class PDNBuilder:
 
             if via_layer and via_layer in occupancies:
                 via_counts = self.layout.get_via_counts(via_layer, (self.ny, self.nx))
-                r_via = max(self.layout.layers[via_layer].via_resistance, 1e-3)
+                r_via = max(self.layers[via_layer].via_resistance, 1e-3)
                 g_via_unit = 1.0 / r_via
                 v_eff_mat = np.where(via_counts > 0, via_counts, occupancies[via_layer])
                 mask_v = (v_eff_mat > 0.01) & (occ_bottom > 0.01) & (occ_top > 0.01)

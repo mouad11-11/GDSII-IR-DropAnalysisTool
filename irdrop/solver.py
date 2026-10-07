@@ -38,6 +38,29 @@ class SolverResult:
     x_coords_um: np.ndarray  # (nx,)
     y_coords_um: np.ndarray  # (ny,)
     warnings: List[str] = field(default_factory=list)
+    solver_method: str = "direct_spsolve"
+    iterations: Optional[int] = None
+    residual: Optional[float] = None
+
+    @property
+    def grid_resolution(self) -> Tuple[int, int]:
+        return (len(self.y_coords_um), len(self.x_coords_um))
+
+    @property
+    def cell_width_um(self) -> float:
+        if len(self.x_coords_um) > 1:
+            return float(self.x_coords_um[1] - self.x_coords_um[0])
+        return 0.0
+
+    @property
+    def cell_height_um(self) -> float:
+        if len(self.y_coords_um) > 1:
+            return float(self.y_coords_um[1] - self.y_coords_um[0])
+        return 0.0
+
+    @property
+    def method_used(self) -> str:
+        return self.solver_method
 
 
 class IRDropSolver:
@@ -161,8 +184,12 @@ class IRDropSolver:
             elif solver_method in ("cg", "amg"):
                 use_direct = False
 
+            actual_method = "direct_spsolve"
+            iter_count: Optional[int] = None
+
             if use_direct:
                 V_U = spla.spsolve(A_UU.tocsc(), b_U)
+                actual_method = "direct_spsolve"
             else:
                 # Solve via Preconditioned Conjugate Gradient (PCG)
                 M = None
@@ -182,10 +209,20 @@ class IRDropSolver:
                     diag = A_UU.diagonal()
                     diag_inv = np.where(diag > 0, 1.0 / diag, 1.0)
                     M = sp.diags(diag_inv, format='csr')
+                    actual_method = "cg_jacobi"
+                else:
+                    actual_method = "amg_cg"
 
-                V_U, info = spla.cg(A_UU, b_U, M=M, rtol=tolerance, atol=1e-12, maxiter=max_iter)
+                iters = 0
+                def cg_cb(xk):
+                    nonlocal iters
+                    iters += 1
+
+                V_U, info = spla.cg(A_UU, b_U, M=M, rtol=tolerance, atol=1e-12, maxiter=max_iter, callback=cg_cb)
+                iter_count = iters
                 if info != 0:
                     V_U = spla.spsolve(A_UU.tocsc(), b_U)
+                    actual_method = "direct_spsolve (fallback)"
                     warnings.append(f"Warning: Iterative solver did not reach tolerance (code={info}); used direct fallback.")
 
             # Residual check
@@ -269,5 +306,8 @@ class IRDropSolver:
             x_coords_um=x_coords,
             y_coords_um=y_coords,
             warnings=warnings,
+            solver_method=actual_method,
+            iterations=iter_count,
+            residual=rel_res if 'rel_res' in locals() else None,
         )
 

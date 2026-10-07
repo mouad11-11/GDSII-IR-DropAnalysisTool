@@ -7,26 +7,35 @@ from pathlib import Path
 import shutil
 import tempfile
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 import uuid
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from irdrop import GDSLayout, IRDropAnalyzer, IRDropSolver, IRDropVisualizer, PDNBuilder
 from irdrop.sample_generator import create_bottleneck_pdn, create_hierarchical_pdn, create_mesh_pdn
 
 app = FastAPI(title="GDSII IR-Drop & Margin Analyzer", version="1.0.0")
 
-# Enable CORS
+# Security configuration
+MAX_UPLOAD_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB upload limit
+SESSION_TTL_SECONDS = 3600  # 1 hour session retention
+
+# Enable CORS with explicit trusted origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -41,6 +50,24 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # In-memory session store: session_id -> dict of cached objects
 SESSION_STORE: Dict[str, Dict[str, Any]] = {}
+
+
+def cleanup_expired_sessions():
+    """Evicts expired sessions and removes uploaded layout files."""
+    now = time.time()
+    expired_ids = [
+        sid for sid, data in SESSION_STORE.items()
+        if now - data.get("created_at", 0) > SESSION_TTL_SECONDS
+    ]
+    for sid in expired_ids:
+        data = SESSION_STORE.pop(sid, None)
+        if data and "gds_path" in data:
+            fp = Path(data["gds_path"])
+            if fp.exists() and UPLOAD_DIR in fp.parents:
+                try:
+                    fp.unlink()
+                except OSError:
+                    pass
 
 
 def ensure_samples():
@@ -61,25 +88,25 @@ ensure_samples()
 
 class AnalysisRequest(BaseModel):
     file_id: str
-    v_nom: float = 1.0
-    limit_mv: float = 50.0
-    total_current: float = 0.4
-    distribution: str = "uniform"
-    grid_resolution: int = 100
+    v_nom: float = Field(default=1.0, gt=0.0, le=100.0)
+    limit_mv: float = Field(default=50.0, gt=0.0, le=10000.0)
+    total_current: float = Field(default=0.4, gt=0.0, le=1000.0)
+    distribution: Literal["uniform", "center_hotspot", "dual_hotspot", "quad_hotspot"] = "uniform"
+    grid_resolution: int = Field(default=100, ge=10, le=500)
     tech: str = "default"
     guess_layers: bool = False
     target_net: str = "VDD"
     net_layers: Optional[List[int]] = None
     layer_overrides: Optional[Dict[str, Dict[str, Any]]] = None
-    heatmap_mode: str = "ir_drop"
+    heatmap_mode: Literal["ir_drop", "voltage", "margin_slack", "3d_surface", "histogram", "current_flow"] = "ir_drop"
     show_layout_overlay: bool = True
     show_contours: bool = True
     show_pads: bool = True
     show_worst_marker: bool = True
     cmap_name: str = "turbo"
     allow_default_pads: bool = False
-    solver_method: str = "auto"
-    max_violation_rows: int = 1000
+    solver_method: Literal["auto", "cg", "amg", "direct"] = "auto"
+    max_violation_rows: int = Field(default=1000, ge=0, le=100000)
 
 
 class CutlineRequest(BaseModel):
@@ -150,6 +177,7 @@ def list_samples():
 @app.post("/api/load-sample/{sample_id}")
 def load_sample(sample_id: str):
     """Loads a built-in benchmark sample."""
+    cleanup_expired_sessions()
     sample_files = {
         "mesh_pdn": SAMPLES_DIR / "mesh_pdn.gds",
         "hierarchical_pdn": SAMPLES_DIR / "hierarchical_pdn.gds",
@@ -163,7 +191,7 @@ def load_sample(sample_id: str):
 
     src_file = sample_files[sample_id]
     file_id = str(uuid.uuid4())
-    dst_file = UPLOAD_DIR / f"{file_id}_{src_file.name}"
+    dst_file = UPLOAD_DIR / f"{file_id}.gds"
     shutil.copyfile(src_file, dst_file)
 
     default_tech = "ihp_sg13g2" if sample_id.startswith("ihp_") else "default"
@@ -174,6 +202,7 @@ def load_sample(sample_id: str):
         "filename": src_file.name,
         "tech": default_tech,
         "guess_layers": False,
+        "created_at": time.time(),
     }
 
     return {
@@ -186,14 +215,28 @@ def load_sample(sample_id: str):
 
 @app.post("/api/upload")
 async def upload_gds(file: UploadFile = File(...)):
-    """Uploads and parses a user GDSII file."""
-    if not (file.filename.lower().endswith(".gds") or file.filename.lower().endswith(".gds2")):
+    """Uploads and parses a user GDSII file with sanitization and size check."""
+    cleanup_expired_sessions()
+    safe_filename = Path(file.filename or "layout.gds").name
+    if not (safe_filename.lower().endswith(".gds") or safe_filename.lower().endswith(".gds2")):
         raise HTTPException(status_code=400, detail="Only GDSII (.gds, .gds2) files are supported")
 
     file_id = str(uuid.uuid4())
-    saved_path = UPLOAD_DIR / f"{file_id}_{file.filename}"
+    saved_path = UPLOAD_DIR / f"{file_id}.gds"
+
+    total_size = 0
     with open(saved_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        while chunk := await file.read(1024 * 1024):
+            total_size += len(chunk)
+            if total_size > MAX_UPLOAD_SIZE_BYTES:
+                buffer.close()
+                if saved_path.exists():
+                    saved_path.unlink()
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File exceeds maximum upload size limit of {MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)} MB",
+                )
+            buffer.write(chunk)
 
     try:
         layout = GDSLayout(str(saved_path), tech="default")
@@ -205,14 +248,15 @@ async def upload_gds(file: UploadFile = File(...)):
     SESSION_STORE[file_id] = {
         "gds_path": str(saved_path),
         "layout": layout,
-        "filename": file.filename,
+        "filename": safe_filename,
         "tech": "default",
         "guess_layers": False,
+        "created_at": time.time(),
     }
 
     return {
         "file_id": file_id,
-        "filename": file.filename,
+        "filename": safe_filename,
         "tech": "default",
         "summary": layout.get_summary(),
     }
@@ -298,6 +342,9 @@ def run_analysis_endpoint(req: AnalysisRequest):
     session["visualizer"] = visualizer
     session["heatmap_b64"] = heatmap_b64
     session["cutline_b64"] = cutline_b64
+    session["builder"] = builder
+    session["network"] = network
+    session["req"] = req
 
     # Downsampled grid for client-side cursor probe (e.g. 50x50)
     stride = max(1, res // 50)
@@ -388,6 +435,38 @@ def export_report(file_id: str):
         raise HTTPException(status_code=400, detail="Run analysis first")
 
     analysis: MarginAnalysisResult = session["analysis"]
+    builder = session.get("builder")
+    network = session.get("network")
+    solver_result = session.get("solver_result")
+    req = session.get("req")
+
+    pad_source = "GDS geometry (pad layers/labels)"
+    if analysis.warnings and any("No power pads detected" in w for w in analysis.warnings):
+        pad_source = "Synthesized (default peripheral & center)"
+
+    layer_resistances = {}
+    if builder:
+        for l_id, l_info in builder.layers.items():
+            layer_resistances[str(l_id)] = {
+                "name": l_info.name,
+                "role": l_info.role,
+                "sheet_resistance": l_info.sheet_resistance,
+                "via_resistance": l_info.via_resistance,
+            }
+
+    provenance = {
+        "tech_file": session.get("tech", "default"),
+        "grid_resolution": [solver_result.grid_resolution[1], solver_result.grid_resolution[0]] if solver_result else None,
+        "cell_size_um": [solver_result.cell_width_um, solver_result.cell_height_um] if solver_result else None,
+        "solver_method": solver_result.method_used if solver_result else None,
+        "solver_iterations": solver_result.iterations if solver_result else None,
+        "pad_count": len(network.pad_node_indices) if network else None,
+        "pad_source": pad_source,
+        "distribution_profile": req.distribution if req else None,
+        "layer_resistances": layer_resistances,
+        "warnings": analysis.warnings,
+    }
+
     report = {
         "project": "GDSII IR-Drop Analysis & Signoff",
         "file": session["filename"],
@@ -424,6 +503,7 @@ def export_report(file_id: str):
             "p95_mv": analysis.p95_drop_mv,
             "p99_mv": analysis.p99_drop_mv,
         },
+        "provenance": provenance,
     }
     return JSONResponse(
         content=report,
@@ -442,6 +522,20 @@ def export_csv(file_id: str):
         raise HTTPException(status_code=400, detail="Run analysis first")
 
     analysis: MarginAnalysisResult = session["analysis"]
+    solver_result = session.get("solver_result")
+    network = session.get("network")
+    req = session.get("req")
+
+    pad_source = "GDS geometry"
+    if analysis.warnings and any("No power pads detected" in w for w in analysis.warnings):
+        pad_source = "Synthesized"
+
+    grid_str = (
+        f"{solver_result.grid_resolution[1]}x{solver_result.grid_resolution[0]} "
+        f"({solver_result.cell_width_um:.2f}x{solver_result.cell_height_um:.2f} um/cell)"
+        if solver_result
+        else "N/A"
+    )
 
     csv_lines = [
         "# VoltDrop GDSII - Signoff Report CSV",
@@ -455,6 +549,11 @@ def export_csv(file_id: str):
         f"# Max Safe Power (W): {analysis.max_safe_power_w}",
         f"# Peak IR-Drop (mV): {analysis.delta_v_max_mv}",
         f"# Min Observed Voltage (V): {analysis.min_observed_voltage_v}",
+        f"# Tech File: {session.get('tech', 'default')}",
+        f"# Grid Resolution: {grid_str}",
+        f"# Solver Method: {solver_result.method_used if solver_result else 'N/A'}",
+        f"# Pad Count: {len(network.pad_node_indices) if network else 'N/A'} ({pad_source})",
+        f"# Current Distribution: {req.distribution if req else 'uniform'}",
         "",
         "Node_Index,X_um,Y_um,IR_Drop_mV,Voltage_V,Margin_Slack_mV",
     ]
@@ -488,10 +587,43 @@ def export_html_report(file_id: str):
         raise HTTPException(status_code=400, detail="Run analysis first")
 
     analysis = session["analysis"]
+    solver_result = session.get("solver_result")
+    network = session.get("network")
+    builder = session.get("builder")
+    req = session.get("req")
+
     filename = html.escape(session["filename"])
     heatmap_b64 = session.get("heatmap_b64", "")
     cutline_b64 = session.get("cutline_b64", "")
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
+
+    pad_source = "GDS geometry (pad layers/labels)"
+    if analysis.warnings and any("No power pads detected" in w for w in analysis.warnings):
+        pad_source = "Synthesized (default peripheral & center fallback)"
+
+    if solver_result:
+        res_str = f"{solver_result.grid_resolution[1]} &times; {solver_result.grid_resolution[0]} ({solver_result.cell_width_um:.2f} &times; {solver_result.cell_height_um:.2f} µm/cell)"
+        if solver_result.iterations is not None:
+            solver_str = f"{solver_result.method_used.upper()} ({solver_result.iterations} iterations, residual {solver_result.residual:.2e}) in {solver_result.solve_time_seconds:.3f}s"
+        else:
+            solver_str = f"{solver_result.method_used.upper()} (direct factorized solve) in {solver_result.solve_time_seconds:.3f}s"
+    else:
+        res_str = "N/A"
+        solver_str = "N/A"
+
+    pad_str = f"{len(network.pad_node_indices)} nodes &mdash; {pad_source}" if network else "N/A"
+    dist_str = f"{req.distribution} (Total: {req.total_current * 1e3:.1f} mA)" if req else "N/A"
+    tech_str = html.escape(session.get("tech", "default"))
+
+    layer_res_list = []
+    if builder:
+        for lid in sorted(builder.layers.keys()):
+            linfo = builder.layers[lid]
+            if linfo.role == "metal":
+                layer_res_list.append(f"L{lid} ({linfo.name}): {linfo.sheet_resistance:.3g} &Omega;/sq")
+            elif linfo.role == "via":
+                layer_res_list.append(f"L{lid} ({linfo.name}): {linfo.via_resistance:.3g} &Omega;")
+    layer_res_str = ", ".join(layer_res_list) if layer_res_list else "Default synthetic values"
 
     if analysis.status == "INVALID":
         status_class = "violation"
@@ -640,6 +772,24 @@ def export_html_report(file_id: str):
             <img src="{cutline_b64}" alt="1D Cutline">
         </div>
     </div>
+
+    <div class="card-lbl" style="margin-bottom:6px;">Analysis Provenance &amp; Verification Environment</div>
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 30%;">Parameter</th>
+                <th>Configuration / Value</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr><td><b>Technology Mapping</b></td><td>{tech_str}</td></tr>
+            <tr><td><b>Discretization Resolution</b></td><td>{res_str}</td></tr>
+            <tr><td><b>Linear Solver</b></td><td>{solver_str}</td></tr>
+            <tr><td><b>Power Pad Boundaries</b></td><td>{pad_str}</td></tr>
+            <tr><td><b>Current Profile</b></td><td>{dist_str}</td></tr>
+            <tr><td><b>Layer Resistances</b></td><td style="font-size:11px; word-break:break-all;">{layer_res_str}</td></tr>
+        </tbody>
+    </table>
 
     <div class="card-lbl" style="margin-bottom:6px;">Hotspot Region Breakdown & Pinpoint</div>
     <table>
