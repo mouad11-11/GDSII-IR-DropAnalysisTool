@@ -1,6 +1,6 @@
 """Sparse linear solver for PDN node potentials and static IR-drop."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import time
 from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
@@ -30,6 +30,7 @@ class SolverResult:
     # Coordinate grids in micrometers
     x_coords_um: np.ndarray  # (nx,)
     y_coords_um: np.ndarray  # (ny,)
+    warnings: List[str] = field(default_factory=list)
 
 
 class IRDropSolver:
@@ -123,9 +124,26 @@ class IRDropSolver:
 
         A_csr = A.tocsr()
 
+        warnings = list(self.network.warnings)
+
         # Solve sparse linear system
         V = spla.spsolve(A_csr, rhs)
         solve_time = time.time() - t0
+
+        # Check residual and NaNs
+        has_nan = bool(np.any(np.isnan(V)) or np.any(np.isinf(V)))
+        if has_nan:
+            warnings.append("Blocking: Solver produced NaN or Inf potential values.")
+            converged = False
+        else:
+            residual = float(np.linalg.norm(A_csr.dot(V) - rhs))
+            rhs_norm = float(np.linalg.norm(rhs))
+            rel_residual = residual / max(rhs_norm, 1e-12)
+            if rel_residual > 1e-3:
+                warnings.append(f"Blocking: Solver relative residual {rel_residual:.2e} exceeded convergence tolerance.")
+                converged = False
+            else:
+                converged = True
 
         # 5. Extract layer grids
         layer_voltages: Dict[int, np.ndarray] = {}
@@ -178,7 +196,7 @@ class IRDropSolver:
             v_nom=v_nom,
             total_current=total_current,
             solve_time_seconds=solve_time,
-            converged=True,
+            converged=converged,
             layer_voltages=layer_voltages,
             layer_ir_drops=layer_ir_drops,
             layer_active_mask=layer_active_mask,
@@ -187,4 +205,6 @@ class IRDropSolver:
             active_die_mask=overall_active_mask,
             x_coords_um=x_coords,
             y_coords_um=y_coords,
+            warnings=warnings,
         )
+

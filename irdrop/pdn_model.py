@@ -24,6 +24,7 @@ class PDNNetwork:
     total_nodes: int
     dx: float  # um per grid cell in x
     dy: float  # um per grid cell in y
+    warnings: List[str] = field(default_factory=list)
 
 
 class PDNBuilder:
@@ -32,6 +33,7 @@ class PDNBuilder:
         layout: GDSLayout,
         grid_resolution: Tuple[int, int] = (100, 100),
         layer_overrides: Optional[Dict[int, Dict[str, Any]]] = None,
+        allow_default_pads: bool = False,
     ):
         """
         Args:
@@ -39,10 +41,12 @@ class PDNBuilder:
             grid_resolution: (ny, nx) discretization resolution
             layer_overrides: Optional dictionary of layer settings:
                 {layer_id: {'role': 'metal'|'via'|'pad'|'ignore', 'sheet_res': float, 'via_res': float}}
+            allow_default_pads: Whether to allow falling back to default boundary pads if none found
         """
         self.layout = layout
         self.ny, self.nx = grid_resolution
         self.layer_overrides = layer_overrides or {}
+        self.allow_default_pads = allow_default_pads
         
         # Apply layer overrides
         for layer, props in self.layer_overrides.items():
@@ -70,7 +74,10 @@ class PDNBuilder:
 
         # Fallback if no metal layers are classified
         if not metal_layers:
-            metal_layers = [l for l in sorted(self.layout.layers.keys()) if l < 60]
+            candidates = [l for l, info in sorted(self.layout.layers.items()) if info.role not in ("pad", "boundary") and l < 60]
+            if not candidates:
+                raise ValueError("No valid current sinks found on active metal rails.")
+            metal_layers = candidates
 
         # Rasterize active layers
         occupancies: Dict[int, np.ndarray] = {}
@@ -156,6 +163,8 @@ class PDNBuilder:
                             idx2 = get_node_idx(m_idx + 1, r, c)
                             add_resistor(idx1, idx2, g_via_unit * overlap)
 
+        warnings: List[str] = []
+
         # Power pad boundary nodes
         pad_nodes_set: Set[int] = set()
         top_metal_idx = num_metals - 1
@@ -180,6 +189,9 @@ class PDNBuilder:
                             pad_nodes_set.add(get_node_idx(top_metal_idx, nr, nc))
 
         if not pad_nodes_set:
+            if not self.allow_default_pads:
+                raise ValueError("No power pads or C4 bumps detected in layout. Use --allow-default-pads to inject default peripheral pads.")
+            warnings.append("Warning: No power pads detected in layout; invented default peripheral and center pads.")
             pad_nodes_set.add(get_node_idx(top_metal_idx, 0, 0))
             pad_nodes_set.add(get_node_idx(top_metal_idx, 0, self.nx - 1))
             pad_nodes_set.add(get_node_idx(top_metal_idx, self.ny - 1, 0))
@@ -192,6 +204,8 @@ class PDNBuilder:
             node_has_connection[p_idx] = True
 
         # Current sinks on standard-cell rail (M1)
+        if len(metal_layers) == 0:
+            raise ValueError("No valid current sinks found on active metal rails.")
         m0_occ = occupancies[metal_layers[0]]
         sink_nodes = []
         for r in range(self.ny):
@@ -201,7 +215,7 @@ class PDNBuilder:
                     sink_nodes.append(idx)
 
         if not sink_nodes:
-            sink_nodes = [i for i in range(total_nodes) if node_has_connection[i] and i not in pad_nodes_set]
+            raise ValueError("No valid current sinks found on active metal rails.")
 
         # Assemble CSR matrix
         if not row_indices:
@@ -216,6 +230,17 @@ class PDNBuilder:
             dtype=np.float64,
         )
         G = G_coo.tocsr()
+
+        # Check electrical connectivity of sinks to pads
+        n_components, comp_labels = sp.csgraph.connected_components(G, directed=False)
+        pad_comps = set(comp_labels[p] for p in final_pad_nodes)
+        disconnected_sinks = [s for s in sink_nodes if comp_labels[s] not in pad_comps]
+        if disconnected_sinks:
+            disc_count = len(disconnected_sinks)
+            disc_frac = disc_count / max(len(sink_nodes), 1)
+            warnings.append(
+                f"Blocking: {disc_count} current sink nodes ({disc_frac * 100:.1f}%) are disconnected from power pads (floating load)."
+            )
 
         # Regularize / isolate unreferenced or disconnected nodes to keep G strictly positive definite
         diag = G.diagonal().copy()
@@ -242,4 +267,6 @@ class PDNBuilder:
             total_nodes=total_nodes,
             dx=self.dx,
             dy=self.dy,
+            warnings=warnings,
         )
+

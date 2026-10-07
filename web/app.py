@@ -73,6 +73,7 @@ class AnalysisRequest(BaseModel):
     show_pads: bool = True
     show_worst_marker: bool = True
     cmap_name: str = "turbo"
+    allow_default_pads: bool = False
 
 
 class CutlineRequest(BaseModel):
@@ -206,7 +207,12 @@ def run_analysis_endpoint(req: AnalysisRequest):
                 pass
 
     res = int(req.grid_resolution)
-    builder = PDNBuilder(layout, grid_resolution=(res, res), layer_overrides=overrides)
+    builder = PDNBuilder(
+        layout,
+        grid_resolution=(res, res),
+        layer_overrides=overrides,
+        allow_default_pads=req.allow_default_pads,
+    )
     network = builder.build_network()
 
     solver = IRDropSolver(network)
@@ -367,6 +373,7 @@ def export_report(file_id: str):
             for h in analysis.hotspots
         ],
         "layer_breakdown": analysis.layer_metrics,
+        "warnings": analysis.warnings,
         "statistics": {
             "mean_drop_mv": analysis.delta_v_avg_mv,
             "std_dev_mv": analysis.delta_v_std_mv,
@@ -443,9 +450,25 @@ def export_html_report(file_id: str):
     cutline_b64 = session.get("cutline_b64", "")
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
 
-    status_class = "pass" if analysis.is_safe else "violation"
-    status_label = "SIGNOFF APPROVED (PASS)" if analysis.is_safe else "SIGNOFF VIOLATION (FAIL)"
+    if analysis.status == "INVALID":
+        status_class = "violation"
+        status_label = "SIGNOFF INVALID (BLOCKING WARNINGS)"
+    elif analysis.is_safe:
+        status_class = "pass"
+        status_label = "SIGNOFF APPROVED (PASS)"
+    else:
+        status_class = "violation"
+        status_label = "SIGNOFF VIOLATION (FAIL)"
+
     margin_sign = "+" if analysis.margin_mv >= 0 else ""
+
+    warning_box = ""
+    if analysis.warnings:
+        warning_box = """
+        <div style="background: rgba(255, 170, 0, 0.08); border: 1px solid #ffaa00; border-radius: 4px; padding: 12px 16px; margin-bottom: 20px;">
+            <div style="color: #ffaa00; font-weight: 700; margin-bottom: 6px;">[SIGNOFF INTEGRITY WARNINGS]</div>
+            <ul style="margin: 0; padding-left: 18px; color: #f1f5f9; font-size: 12px;">
+        """ + "".join(f"<li>{html.escape(w)}</li>" for w in analysis.warnings) + "</ul></div>"
 
     if analysis.current_headroom_ma is not None:
         headroom_str = f"{'+' if analysis.current_headroom_ma >= 0 else ''}{analysis.current_headroom_ma:.1f} mA"
@@ -538,6 +561,8 @@ def export_html_report(file_id: str):
             {status_label}
         </div>
     </div>
+
+    {warning_box}
 
     <div class="grid">
         <div class="card">
