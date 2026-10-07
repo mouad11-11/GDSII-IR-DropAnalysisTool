@@ -62,9 +62,9 @@ class MarginAnalysisResult:
     margin_slack_grid_mv: np.ndarray
 
     # Power & Current Budgeting Signoff
-    max_safe_current_ma: float = 0.0
-    current_headroom_ma: float = 0.0
-    max_safe_power_w: float = 0.0
+    max_safe_current_ma: Optional[float] = None
+    current_headroom_ma: Optional[float] = None
+    max_safe_power_w: Optional[float] = None
     current_power_w: float = 0.0
     effective_pdn_resistance_ohm: float = 0.0
     peak_pdn_resistance_ohm: float = 0.0
@@ -223,12 +223,14 @@ class IRDropAnalyzer:
         total_curr_a = res.total_current
         if delta_v_max_mv > 0.0:
             max_safe_current_ma = round((total_curr_a * (limit_mv / delta_v_max_mv)) * 1000.0, 2)
+            current_headroom_ma = round(max_safe_current_ma - (total_curr_a * 1000.0), 2)
+            max_safe_power_w = round(v_nom * (max_safe_current_ma / 1000.0), 4)
         else:
-            max_safe_current_ma = round(total_curr_a * 1000.0 * 2.0, 2)
+            max_safe_current_ma = None
+            current_headroom_ma = None
+            max_safe_power_w = None
 
-        current_headroom_ma = round(max_safe_current_ma - (total_curr_a * 1000.0), 2)
         current_power_w = round(v_nom * total_curr_a, 4)
-        max_safe_power_w = round(v_nom * (max_safe_current_ma / 1000.0), 4)
 
         effective_pdn_res = round((delta_v_avg_mv / 1000.0) / max(total_curr_a, 1e-6), 4)
         peak_pdn_res = round((delta_v_max_mv / 1000.0) / max(total_curr_a, 1e-6), 4)

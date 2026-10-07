@@ -133,7 +133,7 @@ $$g_{\text{via}} = \frac{1}{R_{\text{via}}}$$
 - **Multi-Tier 3D PDN Modeling:** Configurable per-layer sheet resistances ($R_\square$), via contact resistances ($R_{\text{via}}$), and pad/bump geometries (peripheral rings, staggered pads, or C4 bump area-arrays).
 - **Sparse Linear System Solver:** Memory-efficient Compressed Sparse Column (`csc_matrix`) admittance representation solved via direct sparse LU decomposition (`scipy.sparse.linalg.spsolve`).
 - **Comprehensive Margin Signoff:** Rigorous metrics for maximum drop, minimum rail voltage, average drop, variance, slack percentage, current headroom, and effective impedance.
-- **Hotspot Detection & Clustering:** Spatial grouping of violating nodes via DBSCAN to isolate critical power starvation regions, reporting total affected silicon area in $\mu\text{m}^2$ and percentage of active die.
+- **Hotspot Detection & Clustering:** Spatial grouping of violating nodes via 8-connectivity connected components to isolate critical power starvation regions, reporting total affected silicon area in $\mu\text{m}^2$ and percentage of active die.
 - **Multimodal Visualization:**
   - 2D voltage drop ($\Delta V$) and absolute potential ($V$) distributions with optional layout wireframe overlay.
   - Margin slack map indicating local pass/fail headroom.
@@ -254,6 +254,8 @@ Generated output artifacts in `--output`:
 - `<name>_violations.csv`: Tabular coordinates and voltage metrics for violating nodes.
 - `<name>_report.json`: Machine-readable signoff summary and metadata.
 
+Exit codes for CI/CD automation: `0` on signoff `PASS`, `2` on threshold `VIOLATION`, and `1` on invalid input or runtime error.
+
 ---
 
 ### Python API
@@ -335,7 +337,7 @@ Test coverage includes:
 │   ├── gds_parser.py          # GDSII hierarchy extraction & polygon rasterization
 │   ├── pdn_model.py           # 3D resistive network & boundary condition builder
 │   ├── solver.py              # Sparse MNA solver & current distribution engine
-│   ├── analyzer.py            # Margin signoff metrics & DBSCAN hotspot clustering
+│   ├── analyzer.py            # Margin signoff metrics & connected component hotspot clustering
 │   ├── visualizer.py          # Matplotlib figures (2D heatmaps, 3D surfaces, cutlines)
 │   └── sample_generator.py    # Synthetic PDN layout generator
 ├── web/                       # Full-stack web dashboard

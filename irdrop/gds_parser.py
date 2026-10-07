@@ -78,10 +78,17 @@ class GDSLayout:
         for path in flat_cell.paths:
             all_polys.extend(path.to_polygons())
 
+        scale_to_um = float(self.unit / 1e-6)
+
         # Collect bounding box
         cell_bb = flat_cell.bounding_box()
         if cell_bb is not None:
-            self.bbox = (float(cell_bb[0][0]), float(cell_bb[0][1]), float(cell_bb[1][0]), float(cell_bb[1][1]))
+            self.bbox = (
+                float(cell_bb[0][0]) * scale_to_um,
+                float(cell_bb[0][1]) * scale_to_um,
+                float(cell_bb[1][0]) * scale_to_um,
+                float(cell_bb[1][1]) * scale_to_um,
+            )
         else:
             self.bbox = (0.0, 0.0, 100.0, 100.0)
 
@@ -90,7 +97,7 @@ class GDSLayout:
         
         for poly in all_polys:
             layer = poly.layer
-            points = poly.points.astype(np.float64)  # (N, 2)
+            points = poly.points.astype(np.float64) * scale_to_um  # (N, 2) in um
             if layer not in self.polygons_by_layer:
                 self.polygons_by_layer[layer] = []
                 layer_stats[layer] = {
@@ -120,8 +127,8 @@ class GDSLayout:
         for label in flat_cell.labels:
             self.labels.append({
                 "text": label.text,
-                "x": float(label.origin[0]),
-                "y": float(label.origin[1]),
+                "x": float(label.origin[0]) * scale_to_um,
+                "y": float(label.origin[1]) * scale_to_um,
                 "layer": label.layer,
                 "texttype": label.texttype,
             })

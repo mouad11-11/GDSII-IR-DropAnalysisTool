@@ -1,6 +1,7 @@
 """FastAPI backend for GDSII IR-drop analysis."""
 
 from dataclasses import asdict
+import html
 import json
 from pathlib import Path
 import shutil
@@ -341,7 +342,7 @@ def export_report(file_id: str):
     report = {
         "project": "GDSII IR-Drop Analysis & Signoff",
         "file": session["filename"],
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
         "nominal_voltage_v": analysis.v_nom,
         "drop_limit_mv": analysis.delta_v_limit_mv,
         "min_allowed_voltage_v": analysis.min_allowed_voltage_v,
@@ -437,14 +438,21 @@ def export_html_report(file_id: str):
         raise HTTPException(status_code=400, detail="Run analysis first")
 
     analysis = session["analysis"]
-    filename = session["filename"]
+    filename = html.escape(session["filename"])
     heatmap_b64 = session.get("heatmap_b64", "")
     cutline_b64 = session.get("cutline_b64", "")
-    timestamp = time.strftime("%Y-%m-%d %H:%M:%S UTC")
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
 
     status_class = "pass" if analysis.is_safe else "violation"
     status_label = "SIGNOFF APPROVED (PASS)" if analysis.is_safe else "SIGNOFF VIOLATION (FAIL)"
     margin_sign = "+" if analysis.margin_mv >= 0 else ""
+
+    if analysis.current_headroom_ma is not None:
+        headroom_str = f"{'+' if analysis.current_headroom_ma >= 0 else ''}{analysis.current_headroom_ma:.1f} mA"
+        safe_budget_str = f"Safe Budget: {analysis.max_safe_current_ma:.1f} mA"
+    else:
+        headroom_str = "N/A"
+        safe_budget_str = "Safe Budget: N/A (zero drop)"
 
     hotspot_rows = ""
     for h in analysis.hotspots:
@@ -475,7 +483,7 @@ def export_html_report(file_id: str):
         </tr>
         """
 
-    html = f"""<!DOCTYPE html>
+    html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -549,8 +557,8 @@ def export_html_report(file_id: str):
         </div>
         <div class="card">
             <div class="card-lbl">Safe Current Headroom</div>
-            <div class="card-val {status_class}">{'+' if analysis.current_headroom_ma>=0 else ''}{analysis.current_headroom_ma:.1f} mA</div>
-            <div class="meta">Safe Budget: {analysis.max_safe_current_ma:.1f} mA</div>
+            <div class="card-val {status_class}">{headroom_str}</div>
+            <div class="meta">{safe_budget_str}</div>
         </div>
     </div>
 
@@ -603,7 +611,8 @@ def export_html_report(file_id: str):
     </div>
 </body>
 </html>"""
-    return HTMLResponse(content=html)
+    return HTMLResponse(content=html_content)
+
 
 
 # Mount static files
