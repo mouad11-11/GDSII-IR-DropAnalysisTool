@@ -25,6 +25,7 @@ def run_analysis(
     target_net: str = "VDD",
     net_layers: Optional[list[int]] = None,
     solver_method: str = "auto",
+    max_violation_rows: int = 1000,
 ) -> tuple[GDSLayout, SolverResult, MarginAnalysisResult, IRDropVisualizer]:
     """Runs end-to-end IR-drop and precise margin analysis on a GDSII file."""
     layout = GDSLayout(gds_path, tech=tech, guess_layers=guess_layers)
@@ -44,7 +45,11 @@ def run_analysis(
         distribution=distribution,
         solver_method=solver_method,
     )
-    analyzer = IRDropAnalyzer(result, delta_v_limit_mv=delta_v_limit_mv)
+    analyzer = IRDropAnalyzer(
+        result,
+        delta_v_limit_mv=delta_v_limit_mv,
+        max_violation_rows=max_violation_rows,
+    )
     analysis = analyzer.analyze()
     visualizer = IRDropVisualizer(layout, result, analysis)
     return layout, result, analysis, visualizer

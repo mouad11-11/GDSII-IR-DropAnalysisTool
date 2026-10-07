@@ -79,6 +79,7 @@ class AnalysisRequest(BaseModel):
     cmap_name: str = "turbo"
     allow_default_pads: bool = False
     solver_method: str = "auto"
+    max_violation_rows: int = 1000
 
 
 class CutlineRequest(BaseModel):
@@ -260,7 +261,11 @@ def run_analysis_endpoint(req: AnalysisRequest):
         solver_method=req.solver_method,
     )
 
-    analyzer = IRDropAnalyzer(solver_result, delta_v_limit_mv=req.limit_mv)
+    analyzer = IRDropAnalyzer(
+        solver_result,
+        delta_v_limit_mv=req.limit_mv,
+        max_violation_rows=req.max_violation_rows,
+    )
     analysis = analyzer.analyze()
 
     visualizer = IRDropVisualizer(layout, solver_result, analysis)

@@ -307,6 +307,7 @@ fig.savefig("mesh_ir_drop.png", bbox_inches="tight", dpi=150)
 | `--guess-layers` | `flag` | `False` | Enable heuristic layer guessing for layers omitted from technology configuration (warns when used). |
 | `--allow-default-pads` | `flag` | `False` | Allow default boundary pad fallback if no power pads or C4 bumps are detected. |
 | `--solver` | `choice` | `auto` | Linear system solver method: `auto`, `cg`, `amg`, `direct`. |
+| `--max-violations` | `int` | `1000` | Maximum number of violation nodes to export in CSV (0 for unlimited). |
 
 ---
 
@@ -364,7 +365,8 @@ Test coverage includes:
     ├── test_phase2.py         # Phase 2 strict fail-fast validation tests
     ├── test_phase3.py         # Phase 3 tech file and layer mapping tests
     ├── test_phase4.py         # Phase 4 conductance and net selection tests
-    └── test_phase5.py         # Phase 5 solver and performance tests
+    ├── test_phase5.py         # Phase 5 solver and performance tests
+    └── test_phase6.py         # Phase 6 analysis consistency tests
 ```
 
 ---

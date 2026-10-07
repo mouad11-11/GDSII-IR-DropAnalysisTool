@@ -75,24 +75,29 @@ class MarginAnalysisResult:
 
 
 class IRDropAnalyzer:
-    def __init__(self, solver_result: SolverResult, delta_v_limit_mv: float = 50.0):
+    def __init__(
+        self,
+        solver_result: SolverResult,
+        delta_v_limit_mv: float = 50.0,
+        max_violation_rows: int = 1000,
+    ):
         self.result = solver_result
         self.limit_mv = float(delta_v_limit_mv)
+        self.max_violation_rows = int(max_violation_rows) if max_violation_rows is not None else 1000
 
-    def analyze(self) -> MarginAnalysisResult:
+    def analyze(self, max_violation_rows: Optional[int] = None) -> MarginAnalysisResult:
         res = self.result
         v_nom = res.v_nom
         limit_mv = self.limit_mv
         min_allowed_v = v_nom - (limit_mv / 1000.0)
 
-        # Active nodes evaluation
-        # Gather all active points from composite IR drop
+        # Active nodes evaluation from the physical composite IR drop
         act_mask = res.active_die_mask
         if not np.any(act_mask):
             act_mask = np.ones_like(res.composite_ir_drop_v, dtype=bool)
 
-        active_drops_v = res.composite_ir_drop_v[act_mask]
-        active_drops_mv = active_drops_v * 1000.0
+        composite_drop_mv = res.composite_ir_drop_v * 1000.0
+        active_drops_mv = composite_drop_mv[act_mask]
 
         delta_v_max_mv = float(np.max(active_drops_mv)) if len(active_drops_mv) > 0 else 0.0
         delta_v_avg_mv = float(np.mean(active_drops_mv)) if len(active_drops_mv) > 0 else 0.0
@@ -146,11 +151,11 @@ class IRDropAnalyzer:
             "layer": worst_layer,
         }
 
-        # Violations and Hotspot Clustering
-        # Create binary violation mask
-        violation_mask = (res.smoothed_ir_drop_mv > limit_mv).astype(np.uint8)
-        violating_nodes = int(np.sum(active_drops_mv > limit_mv))
-        total_active_nodes = int(len(active_drops_mv))
+        # Violations and Hotspot Clustering:
+        # Evaluated on the exact physical active-node mask
+        violation_mask = (act_mask & (composite_drop_mv > limit_mv)).astype(np.uint8)
+        violating_nodes = int(np.sum(violation_mask))
+        total_active_nodes = int(np.sum(act_mask))
 
         # Area calculation
         dx = float(res.x_coords_um[1] - res.x_coords_um[0]) if len(res.x_coords_um) > 1 else 1.0
@@ -161,14 +166,14 @@ class IRDropAnalyzer:
         violating_area = violating_nodes * cell_area
         violating_area_pct = round((violating_area / max(total_active_area, 1e-6)) * 100.0, 2)
 
-        # Connected component analysis for hotspots
+        # Connected component analysis for hotspots (keeping single-cell hotspots)
         num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(violation_mask, connectivity=8)
         hotspots: List[HotspotRegion] = []
 
         for h_id in range(1, num_labels):
             h_mask = labels == h_id
             h_pixels = int(stats[h_id, cv2.CC_STAT_AREA])
-            if h_pixels < 2:
+            if h_pixels < 1:
                 continue
 
             h_area_um2 = h_pixels * cell_area
@@ -179,14 +184,14 @@ class IRDropAnalyzer:
 
             # Bounding box in um
             min_x_h = float(res.x_coords_um[left])
-            max_x_h = float(res.x_coords_um[min(left + w, len(res.x_coords_um) - 1)])
+            max_x_h = float(res.x_coords_um[min(left + w - 1, len(res.x_coords_um) - 1)]) if w > 1 else min_x_h
             min_y_h = float(res.y_coords_um[top])
-            max_y_h = float(res.y_coords_um[min(top + h, len(res.y_coords_um) - 1)])
+            max_y_h = float(res.y_coords_um[min(top + h - 1, len(res.y_coords_um) - 1)]) if h > 1 else min_y_h
 
             cx = float(res.x_coords_um[int(round(centroids[h_id][0]))])
             cy = float(res.y_coords_um[int(round(centroids[h_id][1]))])
 
-            h_drops = res.smoothed_ir_drop_mv[h_mask]
+            h_drops = composite_drop_mv[h_mask]
             h_max_drop = float(np.max(h_drops))
             h_avg_drop = float(np.mean(h_drops))
 
@@ -195,14 +200,14 @@ class IRDropAnalyzer:
                     id=h_id,
                     bbox_um=(round(min_x_h, 2), round(min_y_h, 2), round(max_x_h, 2), round(max_y_h, 2)),
                     center_um=(round(cx, 2), round(cy, 2)),
-                    area_um2=round(h_area_um2, 2),
+                    area_um2=round(h_area_um2, 4),
                     max_drop_mv=round(h_max_drop, 2),
                     avg_drop_mv=round(h_avg_drop, 2),
                     violation_severity_mv=round(h_max_drop - limit_mv, 2),
                 )
             )
 
-        # Sort hotspots by severity
+        # Sort hotspots by severity (worst-first)
         hotspots.sort(key=lambda h: h.violation_severity_mv, reverse=True)
 
         # Layer-by-layer breakdown
@@ -230,8 +235,8 @@ class IRDropAnalyzer:
         hist_bins = [round(float(b), 2) for b in bin_edges]
         hist_counts = [int(c) for c in counts]
 
-        # Margin slack grid: positive = safe slack, negative = violation
-        margin_slack_grid = limit_mv - res.smoothed_ir_drop_mv
+        # Margin slack grid computed from physical drop on active nodes
+        margin_slack_grid = np.where(act_mask, limit_mv - composite_drop_mv, limit_mv)
 
         # Power & Current Budgeting
         total_curr_a = res.total_current
@@ -249,18 +254,30 @@ class IRDropAnalyzer:
         effective_pdn_res = round((delta_v_avg_mv / 1000.0) / max(total_curr_a, 1e-6), 4)
         peak_pdn_res = round((delta_v_max_mv / 1000.0) / max(total_curr_a, 1e-6), 4)
 
-        # Collect top violating nodes for CSV export / detailed inspection
+        # Collect violating nodes sorted worst-first
         violating_nodes_list = []
         if violating_nodes > 0:
-            viol_indices = np.where(res.smoothed_ir_drop_mv > limit_mv)
-            for r, c in zip(viol_indices[0][:500], viol_indices[1][:500]):
-                drop_val = float(res.smoothed_ir_drop_mv[r, c])
+            r_viols, c_viols = np.where(violation_mask > 0)
+            drops = composite_drop_mv[r_viols, c_viols]
+            sort_idx = np.argsort(-drops)
+            r_sorted = r_viols[sort_idx]
+            c_sorted = c_viols[sort_idx]
+            drops_sorted = drops[sort_idx]
+
+            cap = max_violation_rows if max_violation_rows is not None else self.max_violation_rows
+            if cap > 0:
+                r_sorted = r_sorted[:cap]
+                c_sorted = c_sorted[:cap]
+                drops_sorted = drops_sorted[:cap]
+
+            for r, c, drop_val in zip(r_sorted, c_sorted, drops_sorted):
+                d_val = float(drop_val)
                 violating_nodes_list.append({
                     "x_um": round(float(res.x_coords_um[c]), 2),
                     "y_um": round(float(res.y_coords_um[r]), 2),
-                    "drop_mv": round(drop_val, 2),
-                    "voltage_v": round(v_nom - drop_val / 1000.0, 4),
-                    "margin_mv": round(limit_mv - drop_val, 2),
+                    "drop_mv": round(d_val, 2),
+                    "voltage_v": round(v_nom - d_val / 1000.0, 4),
+                    "margin_mv": round(limit_mv - d_val, 2),
                 })
 
         return MarginAnalysisResult(

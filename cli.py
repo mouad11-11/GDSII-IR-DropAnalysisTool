@@ -56,6 +56,12 @@ def main():
         choices=["auto", "cg", "amg", "direct"],
         help="Linear solver method ('auto', 'cg', 'amg', 'direct', default: 'auto')",
     )
+    parser.add_argument(
+        "--max-violations",
+        type=int,
+        default=1000,
+        help="Maximum violation nodes to export in CSV (default: 1000, 0 for unlimited)",
+    )
 
     args = parser.parse_args()
 
@@ -84,6 +90,7 @@ def main():
             guess_layers=args.guess_layers,
             target_net=args.net,
             solver_method=args.solver,
+            max_violation_rows=args.max_violations,
         )
     except Exception as e:
         print(f"Error during analysis: {e}", file=sys.stderr)
