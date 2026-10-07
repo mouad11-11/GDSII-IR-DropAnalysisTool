@@ -5,7 +5,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![SciPy MNA](https://img.shields.io/badge/SciPy-Sparse_MNA-8CAAE6.svg?style=flat-square&logo=scipy&logoColor=white)](https://scipy.org/)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey.svg?style=flat-square)]()
-[![Tests](https://img.shields.io/badge/tests-5%20passed-brightgreen.svg?style=flat-square)]()
+[![CI](https://github.com/mouad11-11/GDSII-IR-DropAnalysisTool/actions/workflows/ci.yml/badge.svg)](https://github.com/mouad11-11/GDSII-IR-DropAnalysisTool/actions/workflows/ci.yml)
 
 Static IR-drop analysis and margin signoff verification engine for physical layouts.
 

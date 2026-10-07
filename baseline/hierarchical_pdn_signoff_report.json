@@ -1,0 +1,58 @@
+{
+  "file": "samples/hierarchical_pdn.gds",
+  "v_nom": 1.0,
+  "delta_v_limit_mv": 50.0,
+  "min_allowed_voltage_v": 0.95,
+  "delta_v_max_mv": 17.83,
+  "min_observed_voltage_v": 0.9822,
+  "precise_margin_mv": 32.171,
+  "margin_percentage": 64.34,
+  "status": "PASS",
+  "is_safe": true,
+  "max_safe_current_ma": 1121.74,
+  "current_headroom_ma": 721.74,
+  "max_safe_power_w": 1.1217,
+  "effective_pdn_resistance_ohm": 0.0411,
+  "worst_node": {
+    "x_um": 197.98,
+    "y_um": 197.98,
+    "grid_r": 49,
+    "grid_c": 49,
+    "drop_mv": 17.83,
+    "voltage_v": 0.9822,
+    "layer": 1
+  },
+  "violating_area_percentage": 0.0,
+  "violating_area_um2": 0.0,
+  "hotspots": [],
+  "layer_metrics": [
+    {
+      "layer": 1,
+      "max_drop_mv": 17.83,
+      "avg_drop_mv": 16.67,
+      "margin_mv": 32.17,
+      "status": "PASS"
+    },
+    {
+      "layer": 3,
+      "max_drop_mv": 17.7,
+      "avg_drop_mv": 16.56,
+      "margin_mv": 32.3,
+      "status": "PASS"
+    },
+    {
+      "layer": 5,
+      "max_drop_mv": 17.23,
+      "avg_drop_mv": 14.04,
+      "margin_mv": 32.77,
+      "status": "PASS"
+    },
+    {
+      "layer": 7,
+      "max_drop_mv": 16.78,
+      "avg_drop_mv": 11.18,
+      "margin_mv": 33.22,
+      "status": "PASS"
+    }
+  ]
+}
