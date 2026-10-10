@@ -11,7 +11,6 @@ requires-python = ">=3.10"
 authors = [
     { name = "mouad11-11", email = "rickbriqua@gmail.com" }
 ]
-license = { text = "MIT" }
 dependencies = [
     "gdstk>=0.9.50",
     "numpy>=1.24.0",

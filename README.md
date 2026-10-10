@@ -1,7 +1,6 @@
 # VoltDrop GDSII
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![SciPy MNA](https://img.shields.io/badge/SciPy-Sparse_MNA-8CAAE6.svg?style=flat-square&logo=scipy&logoColor=white)](https://scipy.org/)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey.svg?style=flat-square)]()
@@ -31,7 +30,6 @@ VoltDrop GDSII directly extracts multi-tier metal interconnects and via arrays f
 - [Technology Configuration](#technology-configuration)
 - [Test Suite](#test-suite)
 - [Repository Structure](#repository-structure)
-- [License](#license)
 
 ---
 
@@ -419,9 +417,3 @@ Test modules:
     ├── test_phase7.py         # Phase 7 web hardening and provenance tests
     └── test_phase8.py         # Phase 8 validation and positioning tests
 ```
-
----
-
-## License
-
-This project is licensed under the [MIT License](LICENSE).
